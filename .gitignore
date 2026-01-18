@@ -1,0 +1,31 @@
+# Build
+.build/
+DerivedData/
+
+# App bundle binary (build artifact)
+CCStatusBar.app/Contents/MacOS/CCStatusBar
+CCStatusBar.app/Contents/_CodeSignature/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/
+
+# Logs
+docs/ask/
+docs/log/
+
+# Plans
+plans/
