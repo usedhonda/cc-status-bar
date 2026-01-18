@@ -79,7 +79,7 @@ final class SessionStore {
 
         // Send notification if status changed to waitingInput
         if session.status == .waitingInput && oldStatus != .waitingInput {
-            NotificationManager.notifyWaitingInput(projectName: session.projectName)
+            NotificationManager.shared.notifyWaitingInput(projectName: session.projectName)
             DebugLog.log("[SessionStore] Notification sent for: \(session.projectName)")
         }
 
