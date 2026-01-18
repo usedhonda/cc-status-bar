@@ -108,6 +108,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Settings submenu
+        let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settingsItem.submenu = createSettingsMenu()
+        menu.addItem(settingsItem)
+
         // Copy Diagnostics
         let diagnosticsItem = NSMenuItem(
             title: "Copy Diagnostics",
@@ -130,6 +135,128 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let diagnostics = DebugLog.collectDiagnostics()
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(diagnostics, forType: .string)
+    }
+
+    // MARK: - Settings Menu
+
+    private func createSettingsMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        // Launch at Login
+        let launchItem = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(toggleLaunchAtLogin(_:)),
+            keyEquivalent: ""
+        )
+        launchItem.target = self
+        launchItem.state = LaunchManager.isEnabled ? .on : .off
+        menu.addItem(launchItem)
+
+        // Notifications
+        let notifyItem = NSMenuItem(
+            title: "Notifications",
+            action: #selector(toggleNotifications(_:)),
+            keyEquivalent: ""
+        )
+        notifyItem.target = self
+        notifyItem.state = AppSettings.notificationsEnabled ? .on : .off
+        menu.addItem(notifyItem)
+
+        // Session Timeout submenu
+        let timeoutItem = NSMenuItem(title: "Session Timeout", action: nil, keyEquivalent: "")
+        timeoutItem.submenu = createTimeoutMenu()
+        menu.addItem(timeoutItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Reconfigure Hooks
+        let reconfigureItem = NSMenuItem(
+            title: "Reconfigure Hooks...",
+            action: #selector(reconfigureHooks),
+            keyEquivalent: ""
+        )
+        reconfigureItem.target = self
+        menu.addItem(reconfigureItem)
+
+        return menu
+    }
+
+    private func createTimeoutMenu() -> NSMenu {
+        let menu = NSMenu()
+        let currentTimeout = AppSettings.sessionTimeoutMinutes
+        let options: [(String, Int)] = [
+            ("15 minutes", 15),
+            ("30 minutes", 30),
+            ("60 minutes", 60),
+            ("Never", 0)
+        ]
+
+        for (title, minutes) in options {
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(setSessionTimeout(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = minutes
+            item.state = (currentTimeout == minutes || (minutes == 30 && currentTimeout == 30)) ? .on : .off
+            // Handle "Never" case: currentTimeout == 0 means Never
+            if minutes == 0 && currentTimeout == 0 {
+                item.state = .on
+            } else if minutes == currentTimeout {
+                item.state = .on
+            } else {
+                item.state = .off
+            }
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        do {
+            let newState = !LaunchManager.isEnabled
+            try LaunchManager.setEnabled(newState)
+            sender.state = newState ? .on : .off
+        } catch {
+            DebugLog.log("[AppDelegate] Failed to toggle launch at login: \(error)")
+            showAlert(
+                title: "Launch at Login Error",
+                message: "Failed to change login item setting: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    @objc private func toggleNotifications(_ sender: NSMenuItem) {
+        let newState = !AppSettings.notificationsEnabled
+        AppSettings.notificationsEnabled = newState
+        sender.state = newState ? .on : .off
+
+        if newState {
+            NotificationManager.requestPermission()
+        }
+    }
+
+    @MainActor @objc private func setSessionTimeout(_ sender: NSMenuItem) {
+        AppSettings.sessionTimeoutMinutes = sender.tag
+        DebugLog.log("[AppDelegate] Session timeout set to: \(sender.tag) minutes")
+        rebuildMenu()  // Update checkmark display
+    }
+
+    @objc private func reconfigureHooks() {
+        Task { @MainActor in
+            SetupManager.shared.runSetup(force: true)
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func createSessionMenuItem(_ session: Session) -> NSMenuItem {
@@ -210,59 +337,65 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func focusTerminal(at path: String, tty: String?) {
         _ = path // path reserved for future use
 
-        // Try iTerm2 first, then Terminal.app
-        let script: String
-        if let tty = tty {
-            let escapedTty = tty.replacingOccurrences(of: "\"", with: "\\\"")
-            script = """
-                tell application "System Events"
-                    if exists process "iTerm2" then
-                        tell application "iTerm"
-                            activate
-                            repeat with w in windows
-                                repeat with t in tabs of w
-                                    repeat with s in sessions of t
-                                        if tty of s contains "\(escapedTty)" then
-                                            select w
-                                            select t
-                                            return
-                                        end if
-                                    end repeat
-                                end repeat
-                            end repeat
-                        end tell
-                    else if exists process "Terminal" then
-                        tell application "Terminal"
-                            activate
-                            repeat with w in windows
-                                repeat with t in tabs of w
-                                    if tty of t contains "\(escapedTty)" then
-                                        set frontmost of w to true
-                                        set selected tab of w to t
-                                        return
-                                    end if
-                                end repeat
-                            end repeat
-                        end tell
-                    end if
-                end tell
-                """
-        } else {
-            // Fallback: just activate terminal
-            script = """
-                tell application "System Events"
-                    if exists process "iTerm2" then
-                        tell application "iTerm" to activate
-                    else if exists process "Terminal" then
-                        tell application "Terminal" to activate
-                    end if
-                end tell
-                """
+        // 1. Try tmux first (works with Ghostty, iTerm2, Terminal.app)
+        if let tty = tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            // Select the pane within tmux
+            _ = TmuxHelper.selectPane(paneInfo)
+
+            // Try to switch Ghostty tab
+            if GhosttyHelper.isRunning {
+                _ = GhosttyHelper.focusSession(paneInfo.session)
+                return
+            }
+
+            // Fallback: just activate the terminal
+            activateTerminalApp()
+            return
         }
 
-        if let appleScript = NSAppleScript(source: script) {
+        // 2. Fallback: just activate terminal app
+        activateTerminalApp()
+    }
+
+    private func activateTerminalApp() {
+        // Find running terminal app
+        let findScript = """
+            tell application "System Events"
+                if exists process "Ghostty" then
+                    return "Ghostty"
+                else if exists process "iTerm2" then
+                    return "iTerm"
+                else if exists process "Terminal" then
+                    return "Terminal"
+                end if
+            end tell
+            return ""
+            """
+
+        var appName: String?
+        if let appleScript = NSAppleScript(source: findScript) {
+            var error: NSDictionary?
+            if let result = appleScript.executeAndReturnError(&error).stringValue {
+                appName = result.isEmpty ? nil : result
+            }
+            if let error = error {
+                DebugLog.log("[AppDelegate] AppleScript find error: \(error)")
+            }
+        }
+
+        // Activate the found app
+        guard let app = appName else {
+            DebugLog.log("[AppDelegate] No terminal app found")
+            return
+        }
+
+        let activateScript = "tell application \"\(app)\" to activate"
+        if let appleScript = NSAppleScript(source: activateScript) {
             var error: NSDictionary?
             appleScript.executeAndReturnError(&error)
+            if let error = error {
+                DebugLog.log("[AppDelegate] AppleScript activate error: \(error)")
+            }
         }
     }
 }

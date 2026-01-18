@@ -5,7 +5,12 @@ final class SessionStore {
 
     private let storeDir: URL
     private let storeFile: URL
-    private let timeout: TimeInterval = 30 * 60 // 30 minutes
+
+    private var timeout: TimeInterval {
+        let minutes = AppSettings.sessionTimeoutMinutes
+        // 0 means never timeout
+        return minutes > 0 ? TimeInterval(minutes * 60) : .infinity
+    }
 
     private init() {
         storeDir = SetupManager.appSupportDir
@@ -20,7 +25,13 @@ final class SessionStore {
 
     // MARK: - Write
 
-    func updateSession(event: HookEvent) -> Session {
+    func updateSession(event: HookEvent) -> Session? {
+        // SessionEnd: remove the session entirely
+        if event.hookEventName == .sessionEnd {
+            removeSession(sessionId: event.sessionId, tty: event.tty)
+            return nil
+        }
+
         var data = loadData()
 
         // Determine session key
@@ -67,6 +78,15 @@ final class SessionStore {
         return session
     }
 
+    func removeSession(sessionId: String, tty: String?) {
+        var data = loadData()
+        let key = tty.map { "\(sessionId):\($0)" } ?? sessionId
+        data.sessions.removeValue(forKey: key)
+        data.updatedAt = Date()
+        saveData(data)
+        DebugLog.log("[SessionStore] Session removed: \(key)")
+    }
+
     func clearSessions() {
         saveData(StoreData())
     }
@@ -75,6 +95,8 @@ final class SessionStore {
 
     private func determineStatus(event: HookEvent, current: SessionStatus?) -> SessionStatus {
         switch event.hookEventName {
+        case .sessionEnd:
+            return .stopped  // Will be removed anyway
         case .stop:
             return .waitingInput
         case .notification:
@@ -82,7 +104,7 @@ final class SessionStore {
                 return .waitingInput
             }
             return current ?? .running
-        case .preToolUse, .userPromptSubmit:
+        case .preToolUse, .userPromptSubmit, .sessionStart:
             return .running
         case .postToolUse:
             return current ?? .running

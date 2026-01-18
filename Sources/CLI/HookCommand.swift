@@ -7,7 +7,7 @@ struct HookCommand: ParsableCommand {
         abstract: "Handle a hook event from Claude Code"
     )
 
-    @Argument(help: "The hook event name (PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit)")
+    @Argument(help: "The hook event name (PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit, SessionStart, SessionEnd)")
     var eventName: String
 
     func run() throws {

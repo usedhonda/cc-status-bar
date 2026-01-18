@@ -6,6 +6,8 @@ enum HookEventName: String, Codable {
     case notification = "Notification"
     case stop = "Stop"
     case userPromptSubmit = "UserPromptSubmit"
+    case sessionStart = "SessionStart"
+    case sessionEnd = "SessionEnd"
 }
 
 struct HookEvent: Codable {
