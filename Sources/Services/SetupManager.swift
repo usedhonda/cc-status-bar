@@ -12,7 +12,14 @@ final class SetupManager {
         static let lastConfiguredVersion = "LastConfiguredVersion"
     }
 
-    private static let hookEvents = ["Notification", "Stop", "UserPromptSubmit"]
+    private static let hookEvents = [
+        "Notification",
+        "Stop",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "SessionStart",
+        "SessionEnd"
+    ]
 
     // MARK: - Paths
 
@@ -40,6 +47,16 @@ final class SetupManager {
     private init() {}
 
     // MARK: - Public API
+
+    /// Run setup wizard. Use force=true to reconfigure even if already set up.
+    @MainActor
+    func runSetup(force: Bool = false) {
+        if force {
+            // Reset setup state and run setup
+            UserDefaults.standard.removeObject(forKey: Keys.didCompleteSetup)
+        }
+        showSetupWizard()
+    }
 
     /// Check and run setup if needed. Call this on app launch.
     @MainActor
@@ -237,71 +254,104 @@ final class SetupManager {
         }
 
         var settings: [String: Any] = [:]
-        var backupURL: URL?
+        var originalData: Data?
 
         // Load existing settings if present
         if fm.fileExists(atPath: Self.settingsFile.path) {
-            let data = try Data(contentsOf: Self.settingsFile)
-
-            // Create backup with timestamp
-            let backupName = "settings.json.bak.\(Int(Date().timeIntervalSince1970))"
-            backupURL = Self.claudeDir.appendingPathComponent(backupName)
-            try data.write(to: backupURL!)
+            originalData = try Data(contentsOf: Self.settingsFile)
 
             // Parse JSON with explicit error handling
             do {
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let json = try JSONSerialization.jsonObject(with: originalData!) as? [String: Any] {
                     settings = json
                 } else {
-                    // Valid JSON but not a dictionary
                     DebugLog.log("[SetupManager] settings.json is not a dictionary, using empty settings")
                     DispatchQueue.main.async {
-                        self.showParseErrorAlert(backupPath: backupURL?.path)
+                        self.showParseErrorAlert(backupPath: nil)
                     }
                 }
             } catch {
-                // Invalid JSON - notify user and continue with empty settings
                 DebugLog.log("[SetupManager] JSON parse failed: \(error.localizedDescription)")
                 DispatchQueue.main.async {
-                    self.showParseErrorAlert(backupPath: backupURL?.path)
+                    self.showParseErrorAlert(backupPath: nil)
                 }
-                // Continue with empty settings - hooks will be added fresh
             }
         }
 
         // Get hook command path (use symlink path)
         let hookPath = Self.symlinkURL.path
 
-        // Merge hooks
+        // Get existing hooks
         var hooks = settings["hooks"] as? [String: [[String: Any]]] ?? [:]
+        var needsUpdate = false
 
         for eventName in Self.hookEvents {
-            let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
+            // First, remove ALL existing CCStatusBar hooks (prevents duplicates)
+            var filtered: [[String: Any]] = []
+            var hadExistingHook = false
 
-            // Check if we already have this hook
-            var alreadyExists = false
             if let eventHooks = hooks[eventName] {
                 for hookEntry in eventHooks {
+                    var isCCStatusBarHook = false
                     if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
                         for hook in innerHooks {
                             if let command = hook["command"] as? String,
-                               command.contains("CCStatusBar hook \(eventName)") {
-                                alreadyExists = true
+                               command.contains("CCStatusBar") {
+                                isCCStatusBarHook = true
+                                hadExistingHook = true
                                 break
                             }
                         }
                     }
+                    // Keep non-CCStatusBar hooks
+                    if !isCCStatusBarHook {
+                        filtered.append(hookEntry)
+                    }
                 }
             }
 
-            if !alreadyExists {
-                if var existing = hooks[eventName] {
-                    existing.append(entry)
-                    hooks[eventName] = existing
-                } else {
-                    hooks[eventName] = [entry]
+            // Now add exactly one CCStatusBar hook
+            let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
+            filtered.append(entry)
+            hooks[eventName] = filtered
+
+            // Track if we need to update (either removed duplicates or added new)
+            if !hadExistingHook {
+                needsUpdate = true
+            } else {
+                // Check if we removed duplicates (had more than one CCStatusBar hook)
+                if let eventHooks = (settings["hooks"] as? [String: [[String: Any]]])?[eventName] {
+                    let ccHookCount = eventHooks.filter { entry in
+                        guard let innerHooks = entry["hooks"] as? [[String: Any]] else { return false }
+                        return innerHooks.contains { hook in
+                            (hook["command"] as? String)?.contains("CCStatusBar") == true
+                        }
+                    }.count
+                    if ccHookCount != 1 {
+                        needsUpdate = true
+                    }
                 }
             }
+        }
+
+        // Always update if hooks structure changed
+        let newHooksData = try? JSONSerialization.data(withJSONObject: hooks)
+        let oldHooksData = try? JSONSerialization.data(withJSONObject: settings["hooks"] ?? [:])
+        if newHooksData != oldHooksData {
+            needsUpdate = true
+        }
+
+        // Only write if changes were made
+        guard needsUpdate else {
+            DebugLog.log("[SetupManager] Hooks already configured correctly, no changes needed")
+            return
+        }
+
+        // Create backup before writing (only when actually changing)
+        if let originalData = originalData {
+            let backupURL = Self.claudeDir.appendingPathComponent("settings.json.bak")
+            try originalData.write(to: backupURL)
+            DebugLog.log("[SetupManager] Backup created: \(backupURL.path)")
         }
 
         settings["hooks"] = hooks
@@ -309,19 +359,17 @@ final class SetupManager {
         // Write back
         let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: Self.settingsFile, options: .atomic)
+        DebugLog.log("[SetupManager] Settings updated with CCStatusBar hooks")
     }
 
     private func createHookEntry(eventName: String, hookPath: String) -> [String: Any] {
         // Quote the path to handle spaces in Application Support
-        var entry: [String: Any] = [
+        // Do NOT add empty "matcher" field - it's not needed
+        return [
             "hooks": [
                 ["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"]
             ]
         ]
-        if eventName != "UserPromptSubmit" {
-            entry["matcher"] = ""
-        }
-        return entry
     }
 
     // MARK: - Move Detection
