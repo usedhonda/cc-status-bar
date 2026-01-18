@@ -27,6 +27,11 @@ if hasCliCommand {
 } else {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
+
+    // Initialize NotificationManager before app.run() (Gemini's advice)
+    // This ensures the delegate is set up before any notifications are sent
+    _ = NotificationManager.shared
+
     let delegate = AppDelegate()
     appDelegateHolder = delegate
     app.delegate = delegate
