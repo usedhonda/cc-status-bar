@@ -11,6 +11,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Run setup check (handles first run, app move, repair)
         SetupManager.shared.checkAndRunSetup()
 
+        // Request notification permission if enabled
+        if AppSettings.notificationsEnabled {
+            NotificationManager.requestPermission()
+        }
+
         // Initialize session observer
         sessionObserver = SessionObserver()
 
