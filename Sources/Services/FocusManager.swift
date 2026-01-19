@@ -97,9 +97,11 @@ final class FocusManager {
         }
 
         // Try to find the app with matching project name in window title
-        if let matchingApp = findAppWithProjectWindow(apps: apps, projectName: session.projectName) {
+        if let (matchingApp, matchingWindow) = findAppWithProjectWindow(apps: apps, projectName: session.projectName) {
             let activated = matchingApp.activate(options: [.activateIgnoringOtherApps])
             if activated {
+                // Raise the specific window (important for multi-window editors)
+                AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
                 DebugLog.log("[FocusManager] Activated editor with matching window title for '\(session.projectName)'")
                 return .success
             }
@@ -127,8 +129,8 @@ final class FocusManager {
         AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
     }
 
-    /// Find the app that has a window containing the project name
-    private func findAppWithProjectWindow(apps: [NSRunningApplication], projectName: String) -> NSRunningApplication? {
+    /// Find the app and window containing the project name
+    private func findAppWithProjectWindow(apps: [NSRunningApplication], projectName: String) -> (NSRunningApplication, AXUIElement)? {
         for app in apps {
             let pid = app.processIdentifier
             let appElement = AXUIElementCreateApplication(pid)
@@ -145,7 +147,7 @@ final class FocusManager {
                    let title = titleRef as? String,
                    title.lowercased().contains(projectName.lowercased()) {
                     DebugLog.log("[FocusManager] Found matching window '\(title)' for project '\(projectName)'")
-                    return app
+                    return (app, window)
                 }
             }
         }
