@@ -5,6 +5,7 @@ import Darwin
 struct EditorInfo {
     let bundleID: String
     let displayName: String
+    let pid: pid_t  // Process ID for direct activation
 }
 
 /// Detects VS Code-derived editors via PPID chain inspection
@@ -73,8 +74,14 @@ final class EditorDetector {
                     ?? bundle.infoDictionary?["CFBundleName"] as? String
                     ?? bundleID
 
-                DebugLog.log("[EditorDetector] Found editor: \(name) (\(bundleID)) at \(appPath)")
-                return EditorInfo(bundleID: bundleID, displayName: name)
+                // Get the actual main app PID from NSRunningApplication
+                // The PID found via PPID chain may be a helper process (e.g., pty-host)
+                // which cannot be activated via NSRunningApplication
+                let mainPid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                    .first?.processIdentifier ?? current
+
+                DebugLog.log("[EditorDetector] Found editor: \(name) (\(bundleID)) at \(appPath), main PID: \(mainPid)")
+                return EditorInfo(bundleID: bundleID, displayName: name, pid: mainPid)
             }
         }
 

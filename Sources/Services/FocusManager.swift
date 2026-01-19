@@ -2,16 +2,9 @@ import AppKit
 import Foundation
 
 /// Manages terminal focus operations
-/// Selects the appropriate TerminalController based on session's environment
+/// Uses EnvironmentResolver for single source of truth on environment detection
 final class FocusManager {
     static let shared = FocusManager()
-
-    /// All registered terminal controllers in priority order
-    private let controllers: [TerminalController] = [
-        GhosttyController.shared,
-        ITerm2Controller.shared,
-        TerminalAppController.shared
-    ]
 
     private init() {}
 
@@ -22,52 +15,84 @@ final class FocusManager {
     /// - Returns: FocusResult indicating success or failure
     @discardableResult
     func focus(session: Session) -> FocusResult {
-        let env = session.environmentLabel
+        let env = EnvironmentResolver.shared.resolve(session: session)
+        DebugLog.log("[FocusManager] Focusing '\(session.projectName)' (env: \(env.displayName))")
 
-        DebugLog.log("[FocusManager] Focusing session '\(session.projectName)' (env: \(env))")
+        switch env {
+        case .editor(let bundleID, let pid, let hasTmux, let tmuxSessionName):
+            return activateEditor(
+                bundleID: bundleID,
+                pid: pid,
+                hasTmux: hasTmux,
+                tmuxSessionName: tmuxSessionName,
+                session: session
+            )
 
-        // Check for editor environments first (VS Code, Cursor, Zed, etc.)
-        // Priority: session's detected bundle ID > environment label lookup
-        if let bundleId = session.editorBundleID ?? editorBundleId(for: env) {
-            let result = activateEditor(bundleId: bundleId, env: env, session: session)
-            DebugLog.log("[FocusManager] Editor activation returned: \(result)")
-            return result
+        case .ghostty(let hasTmux, let tabIndex, let tmuxSessionName):
+            return GhosttyController.shared.focus(
+                session: session,
+                hasTmux: hasTmux,
+                tabIndex: tabIndex,
+                tmuxSessionName: tmuxSessionName
+            )
+
+        case .iterm2(let hasTmux, let tmuxSessionName):
+            return ITerm2Controller.shared.focus(
+                session: session,
+                hasTmux: hasTmux,
+                tmuxSessionName: tmuxSessionName
+            )
+
+        case .terminal(let hasTmux, let tmuxSessionName):
+            return TerminalAppController.shared.focus(
+                session: session,
+                hasTmux: hasTmux,
+                tmuxSessionName: tmuxSessionName
+            )
+
+        case .tmuxOnly(let sessionName):
+            return focusTmuxOnly(session: session, sessionName: sessionName)
+
+        case .unknown:
+            return focusFallback(session: session)
         }
-
-        // Find the appropriate controller based on environment label
-        if let controller = controller(for: env) {
-            let result = controller.focus(session: session)
-            DebugLog.log("[FocusManager] \(controller.name) returned: \(result)")
-            return result
-        }
-
-        // Fallback: try to find any running terminal
-        DebugLog.log("[FocusManager] No controller matched env '\(env)', trying fallback")
-        return focusFallback(session: session)
     }
 
     // MARK: - Private
 
-    /// Get editor bundle ID for environment label (fallback for sessions without detected bundle ID)
-    private func editorBundleId(for environmentLabel: String) -> String? {
-        // Extract editor name without "/tmux" suffix
-        let editorName = environmentLabel.components(separatedBy: "/").first ?? environmentLabel
-
-        // Look up bundle ID from display name using EditorDetector
-        return EditorDetector.shared.bundleID(for: editorName)
-    }
-
     /// Activate editor application
-    private func activateEditor(bundleId: String, env: String, session: Session) -> FocusResult {
+    private func activateEditor(
+        bundleID: String,
+        pid: pid_t?,
+        hasTmux: Bool,
+        tmuxSessionName: String?,
+        session: Session
+    ) -> FocusResult {
         // Handle tmux pane selection if needed
-        if env.contains("tmux"), let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+        if hasTmux, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
             _ = TmuxHelper.selectPane(paneInfo)
             DebugLog.log("[FocusManager] Selected tmux pane for editor session")
         }
 
-        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        // Priority 1: Activate by PID if available (most reliable for multiple instances)
+        if let pid = pid {
+            if let app = NSRunningApplication(processIdentifier: pid),
+               !app.isTerminated,
+               app.activationPolicy == .regular {  // Skip helper processes (.accessory/.prohibited)
+                let activated = app.activate(options: [.activateIgnoringOtherApps])
+                if activated {
+                    DebugLog.log("[FocusManager] Activated editor by PID \(pid)")
+                    raiseMainWindow(pid: pid)
+                    return .success
+                }
+            }
+            DebugLog.log("[FocusManager] PID \(pid) not a regular app, falling back to bundle ID")
+        }
+
+        // Priority 2: Bundle ID + window title matching (fallback)
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         guard !apps.isEmpty else {
-            let editorName = env.components(separatedBy: "/").first ?? env
+            let editorName = EditorDetector.shared.displayName(for: bundleID) ?? bundleID
             return .notFound(hint: "\(editorName) is not running")
         }
 
@@ -82,12 +107,24 @@ final class FocusManager {
 
         // Fallback: activate first app
         let activated = apps[0].activate(options: [.activateIgnoringOtherApps])
+        let editorName = EditorDetector.shared.displayName(for: bundleID) ?? bundleID
         if activated {
             DebugLog.log("[FocusManager] Fallback: activated first editor instance")
             return .success
         } else {
-            return .notFound(hint: "Failed to activate \(env)")
+            return .notFound(hint: "Failed to activate \(editorName)")
         }
+    }
+
+    /// Raise main window using Accessibility API for reliability
+    private func raiseMainWindow(pid: pid_t) {
+        let appElement = AXUIElementCreateApplication(pid)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement],
+              let mainWindow = windows.first else { return }
+
+        AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
     }
 
     /// Find the app that has a window containing the project name
@@ -115,30 +152,32 @@ final class FocusManager {
         return nil
     }
 
-    /// Find controller matching the environment label
-    private func controller(for environmentLabel: String) -> TerminalController? {
-        if environmentLabel.contains("Ghostty") {
-            return GhosttyController.shared
+    /// Focus tmux-only sessions (no known terminal)
+    private func focusTmuxOnly(session: Session, sessionName: String) -> FocusResult {
+        // Select tmux pane
+        if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            _ = TmuxHelper.selectPane(paneInfo)
+            DebugLog.log("[FocusManager] Selected tmux pane '\(sessionName)'")
         }
-        if environmentLabel.contains("iTerm2") {
-            return ITerm2Controller.shared
+
+        // Try to activate any running terminal
+        if GhosttyHelper.isRunning {
+            GhosttyController.shared.activate()
+            return .partialSuccess(reason: "tmux pane selected, Ghostty activated")
         }
-        if environmentLabel.contains("Terminal") {
-            return TerminalAppController.shared
+        if ITerm2Helper.isRunning {
+            ITerm2Controller.shared.activate()
+            return .partialSuccess(reason: "tmux pane selected, iTerm2 activated")
         }
-        // "tmux" only (no terminal prefix) - try to detect running terminal
-        if environmentLabel == "tmux" {
-            return findRunningController()
+        if TerminalAppController.shared.isRunning {
+            TerminalAppController.shared.activate()
+            return .partialSuccess(reason: "tmux pane selected, Terminal activated")
         }
-        return nil
+
+        return .partialSuccess(reason: "tmux pane selected, no terminal to activate")
     }
 
-    /// Find the first running terminal controller
-    private func findRunningController() -> TerminalController? {
-        controllers.first { $0.isRunning }
-    }
-
-    /// Fallback focus: try each running terminal
+    /// Fallback focus for unknown environment
     private func focusFallback(session: Session) -> FocusResult {
         // First, try to select tmux pane if applicable
         var tmuxSelected = false
@@ -149,14 +188,20 @@ final class FocusManager {
         }
 
         // Activate any running terminal
-        if let controller = findRunningController() {
-            controller.activate()
-            DebugLog.log("[FocusManager] Fallback: activated \(controller.name)")
-
-            if tmuxSelected {
-                return .partialSuccess(reason: "tmux pane selected, \(controller.name) activated")
-            }
-            return .partialSuccess(reason: "\(controller.name) activated as fallback")
+        if GhosttyHelper.isRunning {
+            GhosttyController.shared.activate()
+            let reason = tmuxSelected ? "tmux pane selected, Ghostty activated" : "Ghostty activated as fallback"
+            return .partialSuccess(reason: reason)
+        }
+        if ITerm2Helper.isRunning {
+            ITerm2Controller.shared.activate()
+            let reason = tmuxSelected ? "tmux pane selected, iTerm2 activated" : "iTerm2 activated as fallback"
+            return .partialSuccess(reason: reason)
+        }
+        if TerminalAppController.shared.isRunning {
+            TerminalAppController.shared.activate()
+            let reason = tmuxSelected ? "tmux pane selected, Terminal activated" : "Terminal activated as fallback"
+            return .partialSuccess(reason: reason)
         }
 
         return .notFound(hint: "No running terminal found")
