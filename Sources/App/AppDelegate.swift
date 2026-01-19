@@ -5,6 +5,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
+    private let animationManager = AnimationManager.shared
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,16 +23,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
+        // Setup animation callback
+        animationManager.onFrameUpdate = { [weak self] in
+            self?.updateStatusTitle()
+            self?.rebuildMenu()
+        }
+
         // Subscribe to session changes
         sessionObserver.$sessions
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.updateAnimationState()
                 self?.updateStatusTitle()
                 self?.rebuildMenu()
             }
             .store(in: &cancellables)
 
         // Set initial state
+        updateAnimationState()
         updateStatusTitle()
         rebuildMenu()
 
@@ -60,19 +69,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let attributed = NSMutableAttributedString()
 
-        // Color and count should match
-        let ccColor: NSColor
-        let count: Int
+        let redCount = sessionObserver.unacknowledgedRedCount
+        let yellowCount = sessionObserver.unacknowledgedYellowCount
+        let greenCount = sessionObserver.displayedGreenCount
+        let totalCount = redCount + yellowCount + greenCount
 
-        if sessionObserver.unacknowledgedWaitingCount > 0 {
+        // "CC" color: red > yellow > green > white priority
+        let ccColor: NSColor
+        if redCount > 0 {
+            ccColor = .systemRed
+        } else if yellowCount > 0 {
             ccColor = .systemYellow
-            count = sessionObserver.unacknowledgedWaitingCount  // Yellow = unacknowledged waiting
-        } else if sessionObserver.runningCount > 0 {
+        } else if greenCount > 0 {
             ccColor = .systemGreen
-            count = sessionObserver.runningCount  // Green = running count
         } else {
             ccColor = .white
-            count = 0
+        }
+
+        // Spinner for green sessions (running)
+        if greenCount > 0 && redCount == 0 && yellowCount == 0 && animationManager.isAnimating {
+            let spinnerAttr = NSAttributedString(
+                string: "\(animationManager.currentSpinnerFrame) ",
+                attributes: [
+                    .foregroundColor: NSColor.systemGreen,
+                    .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+                ]
+            )
+            attributed.append(spinnerAttr)
         }
 
         // "CC" with color
@@ -85,14 +108,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         attributed.append(ccAttr)
 
-        // Add count if > 0
-        if count > 0 {
+        // Count display format
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+
+        if redCount > 0 {
+            // Red exists: " 1/5" (red count in red, /total in white)
+            attributed.append(NSAttributedString(string: " "))
+            attributed.append(NSAttributedString(
+                string: "\(redCount)",
+                attributes: [.foregroundColor: NSColor.systemRed, .font: font]
+            ))
+            if yellowCount + greenCount > 0 {
+                attributed.append(NSAttributedString(
+                    string: "/\(totalCount)",
+                    attributes: [.foregroundColor: NSColor.white, .font: font]
+                ))
+            }
+        } else if yellowCount > 0 {
+            // No red, yellow exists: " 2/5" (yellow count in yellow, /total in white)
+            attributed.append(NSAttributedString(string: " "))
+            attributed.append(NSAttributedString(
+                string: "\(yellowCount)",
+                attributes: [.foregroundColor: NSColor.systemYellow, .font: font]
+            ))
+            if greenCount > 0 {
+                attributed.append(NSAttributedString(
+                    string: "/\(totalCount)",
+                    attributes: [.foregroundColor: NSColor.white, .font: font]
+                ))
+            }
+        } else if greenCount > 0 {
+            // Green only: " 3" (white)
             let countAttr = NSAttributedString(
-                string: " \(count)",
-                attributes: [
-                    .foregroundColor: NSColor.white,
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-                ]
+                string: " \(greenCount)",
+                attributes: [.foregroundColor: NSColor.white, .font: font]
             )
             attributed.append(countAttr)
         }
@@ -105,6 +154,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshUI() {
         updateStatusTitle()
         rebuildMenu()
+    }
+
+    /// Update animation state based on session counts
+    @MainActor
+    private func updateAnimationState() {
+        // Animate when there are running sessions (green) to show activity
+        let needsAnimation = sessionObserver.displayedGreenCount > 0
+        if needsAnimation && !animationManager.isAnimating {
+            animationManager.startAnimation()
+        } else if !needsAnimation && animationManager.isAnimating {
+            animationManager.stopAnimation()
+        }
     }
 
     // MARK: - Menu Building
@@ -215,7 +276,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let options: [(String, Int)] = [
             ("15 minutes", 15),
             ("30 minutes", 30),
-            ("60 minutes", 60),
+            ("1 hour", 60),
+            ("3 hours", 180),
+            ("6 hours", 360),
             ("Never", 0)
         ]
 
@@ -305,23 +368,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ? .running  // Show as green if acknowledged
             : session.status
 
-        // Symbol color
+        // Symbol color: red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
         let symbolColor: NSColor
-        switch displayStatus {
-        case .running:
-            symbolColor = .systemGreen
-        case .waitingInput:
-            symbolColor = .systemYellow
-        case .stopped:
-            symbolColor = .systemGray
+        if !isAcknowledged && session.status == .waitingInput {
+            // Unacknowledged waiting: red for permission_prompt, yellow otherwise
+            symbolColor = (session.waitingReason == .permissionPrompt) ? .systemRed : .systemYellow
+        } else {
+            switch displayStatus {
+            case .running:
+                symbolColor = .systemGreen
+            case .waitingInput:
+                symbolColor = .systemYellow  // Fallback (shouldn't reach here if acknowledged)
+            case .stopped:
+                symbolColor = .systemGray
+            }
         }
 
-        // Line 1: ● project-name
+        // Line 1: ● project-name (or spinner for running sessions)
+        let symbol: String
+        if session.status == .running && animationManager.isAnimating {
+            symbol = animationManager.currentSpinnerFrame  // Animated spinner for running
+        } else {
+            symbol = displayStatus.symbol  // Static symbol (●, ◐, ✓)
+        }
         let symbolAttr = NSAttributedString(
-            string: "\(displayStatus.symbol) ",
+            string: "\(symbol) ",
             attributes: [
                 .foregroundColor: symbolColor,
-                .font: NSFont.systemFont(ofSize: 13)
+                .font: NSFont.systemFont(ofSize: 14)
             ]
         )
         attributed.append(symbolAttr)
@@ -329,7 +403,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let nameAttr = NSAttributedString(
             string: session.projectName,
             attributes: [
-                .font: NSFont.boldSystemFont(ofSize: 13)
+                .font: NSFont.boldSystemFont(ofSize: 14)
             ]
         )
         attributed.append(nameAttr)
@@ -339,7 +413,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             string: "\n   \(session.displayPath)",
             attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
-                .font: NSFont.systemFont(ofSize: 11)
+                .font: NSFont.systemFont(ofSize: 12)
             ]
         )
         attributed.append(pathAttr)
@@ -350,7 +424,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             string: "\n   \(session.environmentLabel) • \(displayStatus.label) • \(timeStr)",
             attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
-                .font: NSFont.systemFont(ofSize: 11)
+                .font: NSFont.systemFont(ofSize: 12)
             ]
         )
         attributed.append(infoAttr)

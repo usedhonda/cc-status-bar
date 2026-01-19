@@ -35,6 +35,38 @@ enum GhosttyHelper {
         return true
     }
 
+    // MARK: - Title Matching
+
+    /// Check if tab title matches target session name
+    /// Uses strict matching to avoid false positives (e.g., "t" matching "status")
+    private static func titleMatches(_ title: String, target: String) -> Bool {
+        let lowTitle = title.lowercased()
+        let lowTarget = target.lowercased()
+
+        // 1. Exact match
+        if lowTitle == lowTarget {
+            return true
+        }
+
+        // 2. Prefix match with delimiter (e.g., "project:branch" matches "project")
+        if lowTitle.hasPrefix(lowTarget + ":") || lowTitle.hasPrefix(lowTarget + " ") {
+            return true
+        }
+
+        // 3. Component match (split by ":" and check first component)
+        let titleComponents = lowTitle.split(separator: ":")
+        if let firstComponent = titleComponents.first, String(firstComponent) == lowTarget {
+            return true
+        }
+
+        // 4. For longer targets (4+ chars), allow contains match
+        if lowTarget.count >= 4 && lowTitle.contains(lowTarget) {
+            return true
+        }
+
+        return false
+    }
+
     // MARK: - Accessibility API based tab control (Gemini recommended)
 
     /// Focus the tab containing the target tmux session using Accessibility API
@@ -133,7 +165,7 @@ enum GhosttyHelper {
                let title = titleValue as? String {
                 DebugLog.log("[GhosttyHelper] Tab \(index + 1): '\(title)'")
 
-                if title.contains(targetTitle) {
+                if titleMatches(title, target: targetTitle) {
                     // Found it! Perform AXPress action to click the tab
                     let pressResult = AXUIElementPerformAction(tab, kAXPressAction as CFString)
                     if pressResult == .success {
@@ -160,7 +192,7 @@ enum GhosttyHelper {
         for (element, title, role) in allTabs {
             DebugLog.log("[GhosttyHelper] Element: role=\(role), title='\(title)'")
 
-            if title.contains(targetTitle) {
+            if titleMatches(title, target: targetTitle) {
                 let pressResult = AXUIElementPerformAction(element, kAXPressAction as CFString)
                 if pressResult == .success {
                     DebugLog.log("[GhosttyHelper] Pressed element with title '\(title)'")
@@ -456,9 +488,9 @@ enum GhosttyHelper {
         }
     }
 
-    /// Check if any tab title contains the given string
+    /// Check if any tab title matches the given session name
     static func hasTabWithTitle(_ searchString: String) -> Bool {
-        return getAllTabTitles().contains { $0.contains(searchString) }
+        return getAllTabTitles().contains { titleMatches($0, target: searchString) }
     }
 
     /// Get all tab titles for debugging

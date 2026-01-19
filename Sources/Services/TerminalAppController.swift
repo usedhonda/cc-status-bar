@@ -18,21 +18,33 @@ final class TerminalAppController: TerminalController {
 
     // MARK: - TerminalController
 
-    func focus(session: Session) -> FocusResult {
+    /// Focus with pre-resolved environment parameters
+    /// - Parameters:
+    ///   - session: The session to focus
+    ///   - hasTmux: Whether tmux is involved (resolved by EnvironmentResolver)
+    ///   - tmuxSessionName: tmux session name if available
+    func focus(
+        session: Session,
+        hasTmux: Bool,
+        tmuxSessionName: String?
+    ) -> FocusResult {
         guard isRunning else {
             return .notRunning
         }
 
         // 1. Select tmux pane if needed (this is the main value we can provide)
-        let tmuxSessionName = selectTmuxPaneIfNeeded(for: session)
+        if hasTmux, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            _ = TmuxHelper.selectPane(paneInfo)
+            DebugLog.log("[TerminalAppController] Selected tmux pane")
+        }
 
         // 2. Activate Terminal.app
         activate()
 
         // Terminal.app doesn't support tab-level control via scripting
         // But if tmux is involved, we've at least selected the right pane
-        if tmuxSessionName != nil {
-            DebugLog.log("[TerminalAppController] Activated with tmux pane '\(tmuxSessionName!)'")
+        if hasTmux {
+            DebugLog.log("[TerminalAppController] Activated with tmux pane '\(tmuxSessionName ?? "unknown")'")
             return .partialSuccess(reason: "tmux pane selected, manual tab switch may be needed")
         }
 

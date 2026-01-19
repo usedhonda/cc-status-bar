@@ -120,7 +120,9 @@ final class SessionStore {
         var session: Session
 
         if var existing = data.sessions[key] {
-            existing.status = determineStatus(event: event, current: existing.status)
+            let (status, waitingReason) = determineStatusAndReason(event: event, current: existing.status)
+            existing.status = status
+            existing.waitingReason = waitingReason
             existing.updatedAt = now
             // Update termProgram if provided (first value wins)
             if existing.termProgram == nil, let termProgram = event.termProgram {
@@ -149,17 +151,19 @@ final class SessionStore {
                 }
             }
 
+            let (status, waitingReason) = determineStatusAndReason(event: event, current: nil)
             session = Session(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
                 tty: event.tty,
-                status: determineStatus(event: event, current: nil),
+                status: status,
                 createdAt: now,
                 updatedAt: now,
                 ghosttyTabIndex: tabIndex,
                 termProgram: event.termProgram,
                 editorBundleID: event.editorBundleID,
-                editorPID: event.editorPID
+                editorPID: event.editorPID,
+                waitingReason: waitingReason
             )
         }
 
@@ -200,21 +204,22 @@ final class SessionStore {
 
     // MARK: - Private
 
-    private func determineStatus(event: HookEvent, current: SessionStatus?) -> SessionStatus {
+    private func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?) {
         switch event.hookEventName {
         case .sessionEnd:
-            return .stopped  // Will be removed anyway
+            return (.stopped, nil)  // Will be removed anyway
         case .stop:
-            return .waitingInput
+            return (.waitingInput, .stop)  // Yellow - command completion waiting
         case .notification:
-            if event.notificationType == "permission_prompt" {
-                return .waitingInput
+            // Use isPermissionPrompt which checks both notification_type and message content
+            if event.isPermissionPrompt {
+                return (.waitingInput, .permissionPrompt)  // Red - permission/choice waiting
             }
-            return current ?? .running
+            return (current ?? .running, nil)
         case .preToolUse, .userPromptSubmit, .sessionStart:
-            return .running
+            return (.running, nil)
         case .postToolUse:
-            return current ?? .running
+            return (current ?? .running, nil)
         }
     }
 

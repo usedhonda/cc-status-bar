@@ -25,8 +25,11 @@ enum AppSettings {
 
     static var sessionTimeoutMinutes: Int {
         get {
-            let value = UserDefaults.standard.integer(forKey: Keys.sessionTimeoutMinutes)
-            return value > 0 ? value : 30  // Default 30 minutes
+            // Check if value was explicitly set (0 = Never is valid)
+            if UserDefaults.standard.object(forKey: Keys.sessionTimeoutMinutes) == nil {
+                return 60  // Default 1 hour
+            }
+            return UserDefaults.standard.integer(forKey: Keys.sessionTimeoutMinutes)
         }
         set { UserDefaults.standard.set(newValue, forKey: Keys.sessionTimeoutMinutes) }
     }
