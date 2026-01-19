@@ -16,6 +16,8 @@ struct HookEvent: Codable {
     var tty: String?
     let hookEventName: HookEventName
     let notificationType: String?
+    var termProgram: String?  // Captured from TERM_PROGRAM environment variable (legacy)
+    var editorBundleID: String?  // Detected editor bundle ID via PPID chain
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -23,5 +25,7 @@ struct HookEvent: Codable {
         case tty
         case hookEventName = "hook_event_name"
         case notificationType = "notification_type"
+        case termProgram = "term_program"
+        case editorBundleID = "editor_bundle_id"
     }
 }
