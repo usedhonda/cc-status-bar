@@ -54,7 +54,6 @@ open CCStatusBar.app
 ```
 
 **Note**: Use self-signed certificate "CCStatusBar Dev" to preserve Accessibility permissions across rebuilds.
-See `plans/crystalline-humming-stardust.md` for certificate setup and distribution signing requirements.
 
 ## Data Source
 

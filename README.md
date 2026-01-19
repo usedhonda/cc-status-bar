@@ -57,9 +57,6 @@ This preserves project-based tab titles and enables reliable tab switching.
 - Warp (limited external tab control API)
 - Non-tmux environments with multiple tabs (TTY identification difficult)
 
-### Future Plans
-See [plans/crystalline-humming-stardust.md](plans/crystalline-humming-stardust.md) for roadmap.
-
 ## Requirements
 
 - macOS 13.0+
