@@ -22,5 +22,9 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>CCStatusBar needs Accessibility permission to switch terminal tabs.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>CCStatusBar needs to control other applications to switch terminal tabs.</string>
 </dict>
 </plist>
