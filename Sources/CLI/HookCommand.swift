@@ -33,9 +33,20 @@ struct HookCommand: ParsableCommand {
         if event.editorBundleID == nil {
             if let editor = EditorDetector.shared.detectFromCurrentProcess() {
                 event.editorBundleID = editor.bundleID
+                event.editorPID = editor.pid
             }
         }
 
-        _ = SessionStore.shared.updateSession(event: event)
+        let session = SessionStore.shared.updateSession(event: event)
+
+        // Set terminal title for Ghostty non-tmux sessions
+        // This enables title-based tab focusing with CC-specific format
+        if let session = session,
+           let tty = session.tty,
+           session.editorBundleID == nil,  // Not an editor session (VS Code, Cursor, etc.)
+           TmuxHelper.getPaneInfo(for: tty) == nil {  // Not a tmux session
+            let title = TtyHelper.ccTitle(project: session.projectName, tty: tty)
+            TtyHelper.setTitle(title, tty: tty)
+        }
     }
 }
