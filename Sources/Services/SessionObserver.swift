@@ -55,6 +55,11 @@ final class SessionObserver: ObservableObject {
         return running + acknowledgedWaiting
     }
 
+    /// Sessions with tools actively running (for spinner animation)
+    var toolRunningCount: Int {
+        sessions.filter { $0.isToolRunning == true }.count
+    }
+
     var hasActiveSessions: Bool {
         !sessions.isEmpty
     }

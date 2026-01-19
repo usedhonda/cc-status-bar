@@ -20,6 +20,8 @@ struct HookCommand: ParsableCommand {
         let decoder = JSONDecoder()
         var event = try decoder.decode(HookEvent.self, from: stdinData)
 
+        DebugLog.log("[HookCommand] Received event: \(eventName) for session \(event.sessionId)")
+
         if event.tty == nil {
             event.tty = TtyDetector.getTty()
         }

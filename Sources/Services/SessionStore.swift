@@ -120,9 +120,11 @@ final class SessionStore {
         var session: Session
 
         if var existing = data.sessions[key] {
-            let (status, waitingReason) = determineStatusAndReason(event: event, current: existing.status)
+            let (status, waitingReason, isToolRunning) = determineStatusAndReason(event: event, current: existing.status)
+            DebugLog.log("[SessionStore] Update session \(key): \(existing.status) -> \(status), reason: \(String(describing: waitingReason)), toolRunning: \(isToolRunning)")
             existing.status = status
             existing.waitingReason = waitingReason
+            existing.isToolRunning = isToolRunning
             existing.updatedAt = now
             // Update termProgram if provided (first value wins)
             if existing.termProgram == nil, let termProgram = event.termProgram {
@@ -151,7 +153,7 @@ final class SessionStore {
                 }
             }
 
-            let (status, waitingReason) = determineStatusAndReason(event: event, current: nil)
+            let (status, waitingReason, isToolRunning) = determineStatusAndReason(event: event, current: nil)
             session = Session(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
@@ -163,7 +165,8 @@ final class SessionStore {
                 termProgram: event.termProgram,
                 editorBundleID: event.editorBundleID,
                 editorPID: event.editorPID,
-                waitingReason: waitingReason
+                waitingReason: waitingReason,
+                isToolRunning: isToolRunning
             )
         }
 
@@ -204,22 +207,24 @@ final class SessionStore {
 
     // MARK: - Private
 
-    private func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?) {
+    private func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?, Bool) {
         switch event.hookEventName {
         case .sessionEnd:
-            return (.stopped, nil)  // Will be removed anyway
+            return (.stopped, nil, false)  // Will be removed anyway
         case .stop:
-            return (.waitingInput, .stop)  // Yellow - command completion waiting
+            return (.waitingInput, .stop, false)  // Yellow - command completion waiting
         case .notification:
             // Use isPermissionPrompt which checks both notification_type and message content
             if event.isPermissionPrompt {
-                return (.waitingInput, .permissionPrompt)  // Red - permission/choice waiting
+                return (.waitingInput, .permissionPrompt, false)  // Red - permission/choice waiting
             }
-            return (current ?? .running, nil)
-        case .preToolUse, .userPromptSubmit, .sessionStart:
-            return (.running, nil)
+            return (current ?? .running, nil, false)
+        case .preToolUse:
+            return (.running, nil, true)  // Tool is running - show spinner
         case .postToolUse:
-            return (current ?? .running, nil)
+            return (current ?? .running, nil, false)  // Tool finished
+        case .userPromptSubmit, .sessionStart:
+            return (.running, nil, false)  // Not running tool yet
         }
     }
 
