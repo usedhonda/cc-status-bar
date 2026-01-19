@@ -1,6 +1,7 @@
 # Build
 .build/
 DerivedData/
+*.zip
 
 # App bundle binary (build artifact)
 CCStatusBar.app/Contents/MacOS/CCStatusBar

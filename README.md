@@ -66,10 +66,11 @@ This preserves project-based tab titles and enables reliable tab switching.
 ## Installation
 
 ### From Release
-1. Download `CCStatusBar.app` from Releases
-2. Move to `/Applications` (or any permanent location)
-3. Launch the app
-4. Follow the setup wizard
+1. Download `CCStatusBar.app.zip` from [Releases](../../releases)
+2. Unzip and move to `/Applications`
+3. Double-click to launch
+4. Grant Accessibility permission when prompted
+5. Follow the setup wizard
 
 ### From Source
 ```bash
@@ -85,6 +86,13 @@ codesign --force --deep --sign - CCStatusBar.app
 # Launch
 open CCStatusBar.app
 ```
+
+## Permissions
+
+- **Accessibility**: Required for terminal tab switching (Ghostty)
+  - System Settings → Privacy & Security → Accessibility → CCStatusBar ✓
+- **Automation**: Required for iTerm2/Terminal.app control
+  - Granted automatically on first use
 
 ## How It Works
 
