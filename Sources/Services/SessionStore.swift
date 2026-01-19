@@ -120,6 +120,14 @@ final class SessionStore {
         if var existing = data.sessions[key] {
             existing.status = determineStatus(event: event, current: existing.status)
             existing.updatedAt = now
+            // Update termProgram if provided (first value wins)
+            if existing.termProgram == nil, let termProgram = event.termProgram {
+                existing.termProgram = termProgram
+            }
+            // Update editorBundleID if provided (first value wins)
+            if existing.editorBundleID == nil, let bundleID = event.editorBundleID {
+                existing.editorBundleID = bundleID
+            }
             session = existing
         } else {
             // New session - capture Ghostty tab index for Bind-on-start
@@ -141,7 +149,9 @@ final class SessionStore {
                 status: determineStatus(event: event, current: nil),
                 createdAt: now,
                 updatedAt: now,
-                ghosttyTabIndex: tabIndex
+                ghosttyTabIndex: tabIndex,
+                termProgram: event.termProgram,
+                editorBundleID: event.editorBundleID
             )
         }
 

@@ -100,6 +100,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.attributedTitle = attributed
     }
 
+    /// Unified UI refresh - ensures status title and menu stay in sync
+    @MainActor
+    private func refreshUI() {
+        updateStatusTitle()
+        rebuildMenu()
+    }
+
     // MARK: - Menu Building
 
     @MainActor
@@ -262,7 +269,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor @objc private func setSessionTimeout(_ sender: NSMenuItem) {
         AppSettings.sessionTimeoutMinutes = sender.tag
         DebugLog.log("[AppDelegate] Session timeout set to: \(sender.tag) minutes")
-        rebuildMenu()  // Update checkmark display
+        refreshUI()  // Update checkmark display
     }
 
     @objc private func reconfigureHooks() {
@@ -422,7 +429,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         sessionObserver.acknowledge(sessionId: session.id)
-        updateStatusTitle()
+        refreshUI()
         DebugLog.log("[AppDelegate] Auto-acknowledged Ghostty session: \(session.projectName)")
     }
 
@@ -433,7 +440,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               session.status == .waitingInput else { return }
 
         sessionObserver.acknowledge(sessionId: session.id)
-        updateStatusTitle()
+        refreshUI()
         DebugLog.log("[AppDelegate] Auto-acknowledged iTerm2 session: \(session.projectName)")
     }
 
@@ -442,7 +449,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             sessionObserver.acknowledge(sessionId: sessionId)
-            updateStatusTitle()
+            refreshUI()
             DebugLog.log("[AppDelegate] Acknowledged session via notification click: \(sessionId)")
         }
     }
