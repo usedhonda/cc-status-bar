@@ -127,15 +127,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         diagnosticsItem.target = self
         menu.addItem(diagnosticsItem)
 
-        // Debug: Dump Ghostty AX Attributes
-        let dumpAXItem = NSMenuItem(
-            title: "Debug: Dump Ghostty AX",
-            action: #selector(dumpGhosttyAX),
-            keyEquivalent: ""
-        )
-        dumpAXItem.target = self
-        menu.addItem(dumpAXItem)
-
         menu.addItem(NSMenuItem(
             title: "Quit",
             action: #selector(NSApplication.terminate(_:)),
@@ -149,20 +140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let diagnostics = DebugLog.collectDiagnostics()
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(diagnostics, forType: .string)
-    }
-
-    @objc private func dumpGhosttyAX() {
-        DebugLog.log("[AppDelegate] === Dumping Ghostty AX Attributes ===")
-        GhosttyHelper.dumpTabAttributes()
-        DebugLog.log("[AppDelegate] === Dump complete. Check debug.log ===")
-
-        // Show alert to user
-        let alert = NSAlert()
-        alert.messageText = "AX Attributes Dumped"
-        alert.informativeText = "Check ~/Library/Logs/CCStatusBar/debug.log"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 
     // MARK: - Settings Menu
@@ -327,9 +304,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         attributed.append(nameAttr)
 
-        // Line 2:   ~/path • Status • 5s ago
+        // Line 2:   ~/path • Environment • Status • 5s ago
         let relativeTime = formatRelativeTime(session.updatedAt)
-        let detailText = "\n   \(session.displayPath) • \(session.status.label) • \(relativeTime)"
+        let detailText = "\n   \(session.displayPath) • \(session.environmentLabel) • \(session.status.label) • \(relativeTime)"
         let detailAttr = NSAttributedString(
             string: detailText,
             attributes: [

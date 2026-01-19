@@ -23,10 +23,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func notify(title: String, body: String, sessionName: String? = nil) {
-        guard AppSettings.notificationsEnabled else {
-            DebugLog.log("[NotificationManager] Notifications disabled, skipping")
-            return
-        }
+        guard AppSettings.notificationsEnabled else { return }
 
         DebugLog.log("[NotificationManager] Sending: \(title) - \(body)")
 
