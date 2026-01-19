@@ -201,8 +201,11 @@ enum GhosttyHelper {
         }
     }
 
-    /// Recursively find an element with the specified role
-    private static func findElement(in parent: AXUIElement, role targetRole: String) -> AXUIElement? {
+    /// Recursively find an element with the specified role (with depth limit to prevent stack overflow)
+    private static func findElement(in parent: AXUIElement, role targetRole: String, depth: Int = 0) -> AXUIElement? {
+        // Prevent stack overflow - limit recursion depth
+        guard depth < 20 else { return nil }
+
         var childrenValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenValue) == .success,
               let children = childrenValue as? [AXUIElement] else {
@@ -217,8 +220,8 @@ enum GhosttyHelper {
                 return child
             }
 
-            // Recurse
-            if let found = findElement(in: child, role: targetRole) {
+            // Recurse with incremented depth
+            if let found = findElement(in: child, role: targetRole, depth: depth + 1) {
                 return found
             }
         }

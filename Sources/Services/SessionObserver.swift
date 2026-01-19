@@ -41,6 +41,11 @@ final class SessionObserver: ObservableObject {
         DebugLog.log("[SessionObserver] Acknowledged session: \(sessionId)")
     }
 
+    /// Check if a session is acknowledged
+    func isAcknowledged(sessionId: String) -> Bool {
+        acknowledgedSessionIds.contains(sessionId)
+    }
+
     /// Find session by TTY
     func session(byTTY tty: String) -> Session? {
         sessions.first { $0.tty == tty }

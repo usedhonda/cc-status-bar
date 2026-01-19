@@ -280,6 +280,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    @MainActor
     private func createSessionMenuItem(_ session: Session) -> NSMenuItem {
         let item = NSMenuItem(
             title: "",
@@ -291,9 +292,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let attributed = NSMutableAttributedString()
 
+        // Check if session is acknowledged (for display purposes)
+        let isAcknowledged = sessionObserver.isAcknowledged(sessionId: session.id)
+        let displayStatus: SessionStatus = (isAcknowledged && session.status == .waitingInput)
+            ? .running  // Show as green if acknowledged
+            : session.status
+
         // Symbol color
         let symbolColor: NSColor
-        switch session.status {
+        switch displayStatus {
         case .running:
             symbolColor = .systemGreen
         case .waitingInput:
@@ -304,7 +311,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Line 1: ● project-name
         let symbolAttr = NSAttributedString(
-            string: "\(session.status.symbol) ",
+            string: "\(displayStatus.symbol) ",
             attributes: [
                 .foregroundColor: symbolColor,
                 .font: NSFont.systemFont(ofSize: 13)
@@ -333,7 +340,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Line 3:   Environment • Status • HH:mm
         let timeStr = formatTime(session.updatedAt)
         let infoAttr = NSAttributedString(
-            string: "\n   \(session.environmentLabel) • \(session.status.label) • \(timeStr)",
+            string: "\n   \(session.environmentLabel) • \(displayStatus.label) • \(timeStr)",
             attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .font: NSFont.systemFont(ofSize: 11)
