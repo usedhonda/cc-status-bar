@@ -127,6 +127,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         diagnosticsItem.target = self
         menu.addItem(diagnosticsItem)
 
+        // Debug: Dump Ghostty AX Attributes
+        let dumpAXItem = NSMenuItem(
+            title: "Debug: Dump Ghostty AX",
+            action: #selector(dumpGhosttyAX),
+            keyEquivalent: ""
+        )
+        dumpAXItem.target = self
+        menu.addItem(dumpAXItem)
+
         menu.addItem(NSMenuItem(
             title: "Quit",
             action: #selector(NSApplication.terminate(_:)),
@@ -140,6 +149,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let diagnostics = DebugLog.collectDiagnostics()
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(diagnostics, forType: .string)
+    }
+
+    @objc private func dumpGhosttyAX() {
+        DebugLog.log("[AppDelegate] === Dumping Ghostty AX Attributes ===")
+        GhosttyHelper.dumpTabAttributes()
+        DebugLog.log("[AppDelegate] === Dump complete. Check debug.log ===")
+
+        // Show alert to user
+        let alert = NSAlert()
+        alert.messageText = "AX Attributes Dumped"
+        alert.informativeText = "Check ~/Library/Logs/CCStatusBar/debug.log"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Settings Menu
@@ -334,31 +357,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func sessionItemClicked(_ sender: NSMenuItem) {
         guard let session = sender.representedObject as? Session else { return }
-        focusTerminal(at: session.cwd, tty: session.tty)
+        focusTerminal(for: session)
     }
 
     // MARK: - Terminal Focus
 
-    private func focusTerminal(at path: String, tty: String?) {
-        _ = path // path reserved for future use
+    private func focusTerminal(for session: Session) {
+        let projectName = session.projectName
 
-        // 1. Try tmux first (works with Ghostty, iTerm2, Terminal.app)
-        if let tty = tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-            // Select the pane within tmux
+        // 1. Try tmux pane selection if TTY is available
+        var tmuxSessionName: String?
+        if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
             _ = TmuxHelper.selectPane(paneInfo)
+            tmuxSessionName = paneInfo.session
+            DebugLog.log("[AppDelegate] Selected tmux pane in session '\(paneInfo.session)'")
+        }
 
-            // Try to switch Ghostty tab
-            if GhosttyHelper.isRunning {
-                _ = GhosttyHelper.focusSession(paneInfo.session)
+        // 2. Try iTerm2 TTY-based search (most reliable)
+        if ITerm2Helper.isRunning, let tty = session.tty {
+            if ITerm2Helper.focusSessionByTTY(tty) {
+                DebugLog.log("[AppDelegate] Focused iTerm2 session by TTY '\(tty)'")
+                return
+            }
+        }
+
+        // 3. Try Ghostty tab focus
+        if GhosttyHelper.isRunning {
+            // 3a. Try Bind-on-start tab index (for non-tmux sessions)
+            if let tabIndex = session.ghosttyTabIndex {
+                if GhosttyHelper.focusTabByIndex(tabIndex) {
+                    DebugLog.log("[AppDelegate] Focused Ghostty tab by index \(tabIndex)")
+                    return
+                }
+            }
+
+            // 3b. Try title-based search (tmux session name or project name)
+            let searchTerm = tmuxSessionName ?? projectName
+            if GhosttyHelper.focusSession(searchTerm) {
+                DebugLog.log("[AppDelegate] Focused Ghostty tab for '\(searchTerm)'")
                 return
             }
 
-            // Fallback: just activate the terminal
-            activateTerminalApp()
-            return
+            // If tmux session name didn't work, try project name as fallback
+            if tmuxSessionName != nil && GhosttyHelper.focusSession(projectName) {
+                DebugLog.log("[AppDelegate] Focused Ghostty tab for project '\(projectName)'")
+                return
+            }
         }
 
-        // 2. Fallback: just activate terminal app
+        // 4. Fallback: just activate terminal app
+        DebugLog.log("[AppDelegate] Fallback: activating terminal app")
         activateTerminalApp()
     }
 

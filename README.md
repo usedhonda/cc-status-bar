@@ -24,10 +24,47 @@ On first launch, the app automatically:
 - Registers hooks in `~/.claude/settings.json`
 - Creates backup of existing settings
 
+## Supported Environments
+
+### Fully Supported
+| Environment | Features |
+|-------------|----------|
+| **Ghostty + tmux** | Full tab switching and pane focus |
+| **iTerm2** | Full tab switching by TTY (with or without tmux) |
+
+### Ghostty without tmux
+By default, Claude Code overrides tab titles to `✳ Claude Code`, making tab switching unreliable.
+
+**Solution:** Disable title changes in Claude Code settings:
+```json
+// ~/.claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
+  }
+}
+```
+
+This preserves project-based tab titles and enables reliable tab switching.
+
+### Partially Supported
+| Environment | Features |
+|-------------|----------|
+| **Terminal.app + tmux** | Pane focus only |
+
+### Not Supported
+- VS Code integrated terminal (limited external API)
+- Warp (limited external tab control API)
+- Non-tmux environments with multiple tabs (TTY identification difficult)
+
+### Future Plans
+See [plans/crystalline-humming-stardust.md](plans/crystalline-humming-stardust.md) for roadmap.
+
 ## Requirements
 
 - macOS 13.0+
 - Claude Code CLI
+- Accessibility permission (for Ghostty tab switching)
 
 ## Installation
 
