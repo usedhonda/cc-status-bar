@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 @MainActor
 final class SessionObserver: ObservableObject {
@@ -82,8 +83,13 @@ final class SessionObserver: ObservableObject {
     // MARK: - Bind-on-start: Capture Ghostty Tab Index
 
     private func captureGhosttyTabIndexForNewSessions(_ loadedSessions: [Session], storeData: StoreData) {
-        // Only if Ghostty is running
+        // Only if Ghostty is running AND no other terminals are running
+        // (We can't reliably determine which terminal a session started in)
         guard GhosttyHelper.isRunning else { return }
+        guard !isOtherTerminalRunning() else {
+            DebugLog.log("[SessionObserver] Bind-on-start: Skipped - other terminal apps running")
+            return
+        }
 
         let now = Date()
         let maxAge: TimeInterval = 5.0  // Only capture if session started within last 5 seconds
@@ -134,6 +140,16 @@ final class SessionObserver: ObservableObject {
             DebugLog.log("[SessionObserver] Bind-on-start: Updated session file with tab index \(tabIndex)")
         } catch {
             DebugLog.log("[SessionObserver] Bind-on-start: Failed to write tab index: \(error)")
+        }
+    }
+
+    /// Check if Terminal.app or iTerm2 is running
+    private func isOtherTerminalRunning() -> Bool {
+        let runningApps = NSWorkspace.shared.runningApplications
+        let otherTerminals = ["com.apple.Terminal", "com.googlecode.iterm2"]
+        return runningApps.contains { app in
+            guard let bundleId = app.bundleIdentifier else { return false }
+            return otherTerminals.contains(bundleId)
         }
     }
 
