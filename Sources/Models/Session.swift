@@ -24,19 +24,23 @@ struct Session: Codable, Identifiable {
     /// Environment label showing terminal and tmux status
     /// e.g., "Ghostty/tmux", "iTerm2", "Ghostty"
     var environmentLabel: String {
-        let isTmux = tty.flatMap { TmuxHelper.getPaneInfo(for: $0) } != nil
+        let tmuxPane = tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
 
-        // Detect terminal app
-        let terminal: String
-        if ghosttyTabIndex != nil || GhosttyHelper.isRunning {
-            terminal = "Ghostty"
-        } else if ITerm2Helper.isRunning {
-            terminal = "iTerm2"
-        } else {
-            terminal = "Terminal"
+        if let pane = tmuxPane {
+            // tmux session - check if Ghostty has a tab with this session name
+            if GhosttyHelper.isRunning && GhosttyHelper.hasTabWithTitle(pane.session) {
+                return "Ghostty/tmux"
+            }
+            return "tmux"
         }
 
-        return isTmux ? "\(terminal)/tmux" : terminal
+        // Non-tmux: check specific evidence
+        if ghosttyTabIndex != nil {
+            return "Ghostty"
+        }
+
+        // No specific evidence - don't guess
+        return "Terminal"
     }
 
     enum CodingKeys: String, CodingKey {

@@ -304,17 +304,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         attributed.append(nameAttr)
 
-        // Line 2:   ~/path • Environment • Status • 5s ago
-        let relativeTime = formatRelativeTime(session.updatedAt)
-        let detailText = "\n   \(session.displayPath) • \(session.environmentLabel) • \(session.status.label) • \(relativeTime)"
-        let detailAttr = NSAttributedString(
-            string: detailText,
+        // Line 2:   ~/path
+        let pathAttr = NSAttributedString(
+            string: "\n   \(session.displayPath)",
             attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .font: NSFont.systemFont(ofSize: 11)
             ]
         )
-        attributed.append(detailAttr)
+        attributed.append(pathAttr)
+
+        // Line 3:   Environment • Status • 5s ago
+        let relativeTime = formatRelativeTime(session.updatedAt)
+        let infoAttr = NSAttributedString(
+            string: "\n   \(session.environmentLabel) • \(session.status.label) • \(relativeTime)",
+            attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 11)
+            ]
+        )
+        attributed.append(infoAttr)
 
         item.attributedTitle = attributed
 

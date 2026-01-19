@@ -415,6 +415,11 @@ enum GhosttyHelper {
         }
     }
 
+    /// Check if any tab title contains the given string
+    static func hasTabWithTitle(_ searchString: String) -> Bool {
+        return getAllTabTitles().contains { $0.contains(searchString) }
+    }
+
     /// Get all tab titles for debugging
     static func getAllTabTitles() -> [String] {
         guard let pid = ghosttyPid else { return [] }
