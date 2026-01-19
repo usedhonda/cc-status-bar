@@ -23,7 +23,68 @@ final class SessionStore {
         return loadData().activeSessions
     }
 
-    // MARK: - Write
+    // MARK: - Write (CCSB Protocol)
+
+    /// Update session from CCSB Events Protocol event
+    func updateSession(ccsbEvent: CCSBEvent) -> Session? {
+        // session.stop: remove the session entirely
+        if ccsbEvent.event == .sessionStop {
+            removeSession(sessionId: ccsbEvent.sessionId, tty: ccsbEvent.tty)
+            return nil
+        }
+
+        var data = loadData()
+
+        // Determine session key (handle both nil and empty string TTY)
+        let key: String
+        if let tty = ccsbEvent.tty, !tty.isEmpty {
+            key = "\(ccsbEvent.sessionId):\(tty)"
+        } else {
+            key = ccsbEvent.sessionId
+        }
+
+        // Remove old sessions on same TTY
+        if let tty = ccsbEvent.tty, !tty.isEmpty {
+            data.sessions = data.sessions.filter { (k, v) in
+                if v.tty == tty && k != key {
+                    return false
+                }
+                return true
+            }
+        }
+
+        // Create or update session
+        let existing = data.sessions[key]
+        var session = ccsbEvent.toSession(existingSession: existing)
+
+        // Capture Ghostty tab index for Bind-on-start on new sessions
+        if existing == nil && ccsbEvent.event == .sessionStart && GhosttyHelper.isRunning {
+            if let tty = ccsbEvent.tty, TmuxHelper.getPaneInfo(for: tty) == nil {
+                session.ghosttyTabIndex = GhosttyHelper.getSelectedTabIndex()
+                if let idx = session.ghosttyTabIndex {
+                    DebugLog.log("[SessionStore] CCSB Bind-on-start: captured tab index \(idx) for session \(ccsbEvent.sessionId)")
+                }
+            }
+        } else if let existing = existing {
+            session.ghosttyTabIndex = existing.ghosttyTabIndex
+        }
+
+        data.sessions[key] = session
+        data.updatedAt = Date()
+
+        // Clean up timed out sessions
+        data.sessions = data.sessions.filter { (_, v) in
+            Date().timeIntervalSince(v.updatedAt) <= timeout
+        }
+
+        saveData(data)
+
+        DebugLog.log("[SessionStore] CCSB event processed: \(ccsbEvent.event.rawValue) for \(ccsbEvent.tool.name)")
+
+        return session
+    }
+
+    // MARK: - Write (Legacy Hook Events)
 
     func updateSession(event: HookEvent) -> Session? {
         // SessionEnd: remove the session entirely
@@ -34,11 +95,16 @@ final class SessionStore {
 
         var data = loadData()
 
-        // Determine session key
-        let key = event.tty.map { "\(event.sessionId):\($0)" } ?? event.sessionId
+        // Determine session key (handle both nil and empty string TTY)
+        let key: String
+        if let tty = event.tty, !tty.isEmpty {
+            key = "\(event.sessionId):\(tty)"
+        } else {
+            key = event.sessionId
+        }
 
         // Remove old sessions on same TTY
-        if let tty = event.tty {
+        if let tty = event.tty, !tty.isEmpty {
             data.sessions = data.sessions.filter { (k, v) in
                 if v.tty == tty && k != key {
                     return false
@@ -97,7 +163,13 @@ final class SessionStore {
 
     func removeSession(sessionId: String, tty: String?) {
         var data = loadData()
-        let key = tty.map { "\(sessionId):\($0)" } ?? sessionId
+        // Handle both nil and empty string TTY
+        let key: String
+        if let tty = tty, !tty.isEmpty {
+            key = "\(sessionId):\(tty)"
+        } else {
+            key = sessionId
+        }
         data.sessions.removeValue(forKey: key)
         data.updatedAt = Date()
         saveData(data)

@@ -34,6 +34,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Set initial state
         updateStatusTitle()
         rebuildMenu()
+
+        // Watch for terminal app activation to auto-acknowledge sessions
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(terminalDidActivate(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+
+        // Watch for notification click to acknowledge session
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAcknowledgeSession(_:)),
+            name: .acknowledgeSession,
+            object: nil
+        )
     }
 
     // MARK: - Status Title
@@ -48,9 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let ccColor: NSColor
         let count: Int
 
-        if sessionObserver.waitingCount > 0 {
+        if sessionObserver.unacknowledgedWaitingCount > 0 {
             ccColor = .systemYellow
-            count = sessionObserver.waitingCount  // Yellow = waiting count
+            count = sessionObserver.unacknowledgedWaitingCount  // Yellow = unacknowledged waiting
         } else if sessionObserver.runningCount > 0 {
             ccColor = .systemGreen
             count = sessionObserver.runningCount  // Green = running count
@@ -314,10 +330,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         attributed.append(pathAttr)
 
-        // Line 3:   Environment • Status • 5s ago
-        let relativeTime = formatRelativeTime(session.updatedAt)
+        // Line 3:   Environment • Status • HH:mm
+        let timeStr = formatTime(session.updatedAt)
         let infoAttr = NSAttributedString(
-            string: "\n   \(session.environmentLabel) • \(session.status.label) • \(relativeTime)",
+            string: "\n   \(session.environmentLabel) • \(session.status.label) • \(timeStr)",
             attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .font: NSFont.systemFont(ofSize: 11)
@@ -330,15 +346,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    private func formatRelativeTime(_ date: Date) -> String {
-        let seconds = Int(-date.timeIntervalSinceNow)
-        if seconds < 60 {
-            return "\(seconds)s ago"
-        } else if seconds < 3600 {
-            return "\(seconds / 60)m ago"
-        } else {
-            return "\(seconds / 3600)h ago"
-        }
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     @objc private func sessionItemClicked(_ sender: NSMenuItem) {
@@ -349,92 +360,83 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Terminal Focus
 
     private func focusTerminal(for session: Session) {
-        let projectName = session.projectName
-
-        // 1. Try tmux pane selection if TTY is available
-        var tmuxSessionName: String?
-        if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-            _ = TmuxHelper.selectPane(paneInfo)
-            tmuxSessionName = paneInfo.session
-            DebugLog.log("[AppDelegate] Selected tmux pane in session '\(paneInfo.session)'")
-        }
-
-        // 2. Try iTerm2 TTY-based search (most reliable)
-        if ITerm2Helper.isRunning, let tty = session.tty {
-            if ITerm2Helper.focusSessionByTTY(tty) {
-                DebugLog.log("[AppDelegate] Focused iTerm2 session by TTY '\(tty)'")
-                return
-            }
-        }
-
-        // 3. Try Ghostty tab focus
-        if GhosttyHelper.isRunning {
-            // 3a. Try Bind-on-start tab index (for non-tmux sessions)
-            if let tabIndex = session.ghosttyTabIndex {
-                if GhosttyHelper.focusTabByIndex(tabIndex) {
-                    DebugLog.log("[AppDelegate] Focused Ghostty tab by index \(tabIndex)")
-                    return
-                }
-            }
-
-            // 3b. Try title-based search (tmux session name or project name)
-            let searchTerm = tmuxSessionName ?? projectName
-            if GhosttyHelper.focusSession(searchTerm) {
-                DebugLog.log("[AppDelegate] Focused Ghostty tab for '\(searchTerm)'")
-                return
-            }
-
-            // If tmux session name didn't work, try project name as fallback
-            if tmuxSessionName != nil && GhosttyHelper.focusSession(projectName) {
-                DebugLog.log("[AppDelegate] Focused Ghostty tab for project '\(projectName)'")
-                return
-            }
-        }
-
-        // 4. Fallback: just activate terminal app
-        DebugLog.log("[AppDelegate] Fallback: activating terminal app")
-        activateTerminalApp()
+        FocusManager.shared.focus(session: session)
     }
 
-    private func activateTerminalApp() {
-        // Find running terminal app
-        let findScript = """
-            tell application "System Events"
-                if exists process "Ghostty" then
-                    return "Ghostty"
-                else if exists process "iTerm2" then
-                    return "iTerm"
-                else if exists process "Terminal" then
-                    return "Terminal"
-                end if
-            end tell
-            return ""
-            """
+    // MARK: - Auto-Acknowledge on Terminal Focus
 
-        var appName: String?
-        if let appleScript = NSAppleScript(source: findScript) {
-            var error: NSDictionary?
-            if let result = appleScript.executeAndReturnError(&error).stringValue {
-                appName = result.isEmpty ? nil : result
-            }
-            if let error = error {
-                DebugLog.log("[AppDelegate] AppleScript find error: \(error)")
-            }
-        }
-
-        // Activate the found app
-        guard let app = appName else {
-            DebugLog.log("[AppDelegate] No terminal app found")
+    @objc private func terminalDidActivate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleId = app.bundleIdentifier else {
+            DebugLog.log("[AppDelegate] terminalDidActivate: no app info")
             return
         }
 
-        let activateScript = "tell application \"\(app)\" to activate"
-        if let appleScript = NSAppleScript(source: activateScript) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if let error = error {
-                DebugLog.log("[AppDelegate] AppleScript activate error: \(error)")
+        DebugLog.log("[AppDelegate] App activated: \(bundleId)")
+
+        Task { @MainActor in
+            switch bundleId {
+            case GhosttyHelper.bundleIdentifier:
+                acknowledgeActiveGhosttySession()
+            case ITerm2Helper.bundleIdentifier:
+                acknowledgeActiveITerm2Session()
+            default:
+                break
             }
+        }
+    }
+
+    @MainActor
+    private func acknowledgeActiveGhosttySession() {
+        // Try tab title first (works for tmux sessions)
+        var session: Session?
+
+        if let tabTitle = GhosttyHelper.getSelectedTabTitle() {
+            DebugLog.log("[AppDelegate] Ghostty tab title: '\(tabTitle)'")
+            session = sessionObserver.session(byTabTitle: tabTitle)
+        }
+
+        // Fallback to tab index (for non-tmux with bind-on-start)
+        if session == nil, let tabIndex = GhosttyHelper.getSelectedTabIndex() {
+            DebugLog.log("[AppDelegate] Ghostty tab index: \(tabIndex)")
+            session = sessionObserver.session(byTabIndex: tabIndex)
+        }
+
+        guard let session = session else {
+            DebugLog.log("[AppDelegate] Ghostty: no matching session found")
+            return
+        }
+
+        DebugLog.log("[AppDelegate] Ghostty session: \(session.projectName), status: \(session.status)")
+
+        guard session.status == .waitingInput else {
+            DebugLog.log("[AppDelegate] Ghostty: session not waitingInput")
+            return
+        }
+
+        sessionObserver.acknowledge(sessionId: session.id)
+        updateStatusTitle()
+        DebugLog.log("[AppDelegate] Auto-acknowledged Ghostty session: \(session.projectName)")
+    }
+
+    @MainActor
+    private func acknowledgeActiveITerm2Session() {
+        guard let tty = ITerm2Helper.getCurrentTTY(),
+              let session = sessionObserver.session(byTTY: tty),
+              session.status == .waitingInput else { return }
+
+        sessionObserver.acknowledge(sessionId: session.id)
+        updateStatusTitle()
+        DebugLog.log("[AppDelegate] Auto-acknowledged iTerm2 session: \(session.projectName)")
+    }
+
+    @objc private func handleAcknowledgeSession(_ notification: Notification) {
+        guard let sessionId = notification.userInfo?["sessionId"] as? String else { return }
+
+        Task { @MainActor in
+            sessionObserver.acknowledge(sessionId: sessionId)
+            updateStatusTitle()
+            DebugLog.log("[AppDelegate] Acknowledged session via notification click: \(sessionId)")
         }
     }
 }

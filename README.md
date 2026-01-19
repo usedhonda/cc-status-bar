@@ -124,6 +124,73 @@ CCStatusBar setup --uninstall
 
 # List active sessions
 CCStatusBar list
+
+# Emit CCSB protocol event (for external tools)
+CCStatusBar emit --tool aider --event session.start --session-id abc123
+```
+
+## CCSB Events Protocol
+
+CC Status Bar supports a standardized event protocol for integration with external CLI tools.
+
+### Event Types
+
+| Event | Description |
+|-------|-------------|
+| `session.start` | Session started |
+| `session.stop` | Session ended |
+| `session.waiting` | Waiting for user input |
+| `session.running` | Running/executing |
+| `artifact.link` | Link to artifact (file, URL, PR) |
+
+### Attention Levels
+
+| Level | Color | Description |
+|-------|-------|-------------|
+| `green` | 🟢 | Running, no action needed |
+| `yellow` | 🟡 | Waiting for input |
+| `red` | 🔴 | Error or critical |
+| `none` | ⚪ | Stopped |
+
+### CLI Usage
+
+```bash
+# Start a session
+CCStatusBar emit --tool aider --event session.start --session-id my-session-001
+
+# Mark as waiting
+CCStatusBar emit --tool terraform --event session.waiting --session-id tf-plan-001 \
+  --summary "Waiting for plan approval"
+
+# Stop a session
+CCStatusBar emit --tool aider --event session.stop --session-id my-session-001
+```
+
+### JSON Format
+
+```json
+{
+  "proto": "ccsb.v1",
+  "event": "session.waiting",
+  "session_id": "unique-id",
+  "timestamp": "2026-01-19T12:00:00Z",
+  "tool": {
+    "name": "aider",
+    "version": "0.50.0"
+  },
+  "cwd": "/path/to/project",
+  "tty": "/dev/ttys001",
+  "attention": {
+    "level": "yellow",
+    "reason": "Waiting for user input"
+  },
+  "summary": "Waiting for input"
+}
+```
+
+Pipe JSON directly:
+```bash
+echo '{"proto":"ccsb.v1",...}' | CCStatusBar emit --json
 ```
 
 ## Troubleshooting

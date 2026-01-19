@@ -1,32 +1,5 @@
 import AppKit
 
-// MARK: - ITerm2Adapter (TerminalAdapter conformance)
-
-/// Adapter implementation for iTerm2 terminal
-final class ITerm2Adapter: TerminalAdapter {
-    let name = "iTerm2"
-    let bundleIdentifier = ITerm2Helper.bundleIdentifier
-    let capabilities: TerminalCapabilities = [.focusByTTY, .activateOnly]
-
-    var isRunning: Bool {
-        ITerm2Helper.isRunning
-    }
-
-    func focusSession(_ sessionName: String) -> Bool {
-        // iTerm2 does not support title-based search in this implementation
-        // Use focusByTTY instead
-        false
-    }
-
-    func focusByTTY(_ tty: String) -> Bool {
-        ITerm2Helper.focusSessionByTTY(tty)
-    }
-
-    func activate() -> Bool {
-        ITerm2Helper.activate()
-    }
-}
-
 // MARK: - ITerm2Helper (static API)
 
 enum ITerm2Helper {
@@ -91,8 +64,45 @@ enum ITerm2Helper {
         return success
     }
 
+    /// Get the TTY of the currently focused session
+    /// - Returns: TTY path (e.g., "/dev/ttys002") or nil
+    static func getCurrentTTY() -> String? {
+        guard isRunning else { return nil }
+
+        let script = """
+            tell application "iTerm"
+                try
+                    return tty of current session of current tab of current window
+                on error
+                    return ""
+                end try
+            end tell
+            """
+
+        guard let appleScript = NSAppleScript(source: script) else {
+            DebugLog.log("[ITerm2Helper] Failed to create AppleScript for getCurrentTTY")
+            return nil
+        }
+
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+
+        if let error = error {
+            DebugLog.log("[ITerm2Helper] getCurrentTTY error: \(error)")
+            return nil
+        }
+
+        guard let tty = result.stringValue, !tty.isEmpty else {
+            return nil
+        }
+
+        DebugLog.log("[ITerm2Helper] Current TTY: \(tty)")
+        return tty
+    }
+
     /// Activate iTerm2 (bring to front)
     /// - Returns: true if successfully activated
+    @discardableResult
     static func activate() -> Bool {
         guard let app = runningApp else {
             DebugLog.log("[ITerm2Helper] iTerm2 not running")
@@ -102,5 +112,57 @@ enum ITerm2Helper {
         app.activate(options: [.activateIgnoringOtherApps])
         DebugLog.log("[ITerm2Helper] Activated iTerm2")
         return true
+    }
+
+    /// Focus session by name/title (for tmux sessions)
+    /// Searches all tabs in all windows for a session whose name contains the search term
+    /// - Parameter sessionName: The session name to search for (e.g., tmux session name)
+    /// - Returns: true if successfully focused
+    static func focusSessionByName(_ sessionName: String) -> Bool {
+        let escapedName = sessionName.replacingOccurrences(of: "\"", with: "\\\"")
+
+        // Search for tab whose name contains the session name
+        let script = """
+            tell application "iTerm"
+                try
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            set tabName to name of current session of t
+                            if tabName contains "\(escapedName)" then
+                                select t
+                                select w
+                                activate
+                                return "true"
+                            end if
+                        end repeat
+                    end repeat
+                    return "false"
+                on error errMsg
+                    return "error: " & errMsg
+                end try
+            end tell
+            """
+
+        guard let appleScript = NSAppleScript(source: script) else {
+            DebugLog.log("[ITerm2Helper] Failed to create AppleScript for name search")
+            return false
+        }
+
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+
+        if let error = error {
+            DebugLog.log("[ITerm2Helper] AppleScript error (name search): \(error)")
+            return false
+        }
+
+        let resultStr = result.stringValue ?? ""
+        if resultStr == "true" {
+            DebugLog.log("[ITerm2Helper] Successfully focused session with name '\(sessionName)'")
+            return true
+        } else {
+            DebugLog.log("[ITerm2Helper] Could not find session with name '\(sessionName)': \(resultStr)")
+            return false
+        }
     }
 }

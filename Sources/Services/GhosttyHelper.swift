@@ -2,44 +2,37 @@ import AppKit
 import Carbon
 import ApplicationServices
 
-// MARK: - GhosttyAdapter (TerminalAdapter conformance)
-
-/// Adapter implementation for Ghostty terminal
-final class GhosttyAdapter: TerminalAdapter {
-    let name = "Ghostty"
-    let bundleIdentifier = "com.mitchellh.ghostty"
-    let capabilities: TerminalCapabilities = [.focusBySession, .activateOnly]
-
-    var isRunning: Bool {
-        GhosttyHelper.isRunning
-    }
-
-    func focusSession(_ sessionName: String) -> Bool {
-        GhosttyHelper.focusSession(sessionName)
-    }
-
-    func activate() -> Bool {
-        guard let pid = GhosttyHelper.ghosttyPid else { return false }
-        GhosttyHelper.activateGhostty(pid: pid)
-        return true
-    }
-}
-
-// MARK: - GhosttyHelper (static API for compatibility)
+// MARK: - GhosttyHelper (static API)
 
 enum GhosttyHelper {
+    static let bundleIdentifier = "com.mitchellh.ghostty"
+
     /// Check if Ghostty is running
     static var isRunning: Bool {
         !NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.mitchellh.ghostty"
+            withBundleIdentifier: bundleIdentifier
         ).isEmpty
     }
 
     /// Get Ghostty's PID
     static var ghosttyPid: pid_t? {
         NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.mitchellh.ghostty"
+            withBundleIdentifier: bundleIdentifier
         ).first?.processIdentifier
+    }
+
+    /// Activate Ghostty (bring to front)
+    @discardableResult
+    static func activate() -> Bool {
+        guard let app = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        ).first else {
+            DebugLog.log("[GhosttyHelper] Ghostty not running")
+            return false
+        }
+        app.activate(options: [.activateIgnoringOtherApps])
+        DebugLog.log("[GhosttyHelper] Activated Ghostty")
+        return true
     }
 
     // MARK: - Accessibility API based tab control (Gemini recommended)
@@ -234,6 +227,51 @@ enum GhosttyHelper {
     }
 
     // MARK: - Tab Index Operations (Bind-on-start)
+
+    /// Get the title of the currently selected tab
+    /// Returns nil if no tab is selected or error occurs
+    static func getSelectedTabTitle() -> String? {
+        guard let pid = ghosttyPid else {
+            return nil
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              let window = windows.first else {
+            return nil
+        }
+
+        guard let tabGroup = findElement(in: window, role: "AXTabGroup") else {
+            return nil
+        }
+
+        var childrenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(tabGroup, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let tabs = childrenValue as? [AXUIElement] else {
+            return nil
+        }
+
+        // Find the selected tab (AXValue == 1) and get its title
+        for tab in tabs {
+            var valueRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(tab, kAXValueAttribute as CFString, &valueRef) == .success,
+               let value = valueRef as? NSNumber,
+               value.intValue == 1 {
+                // Get the title
+                var titleRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(tab, kAXTitleAttribute as CFString, &titleRef) == .success,
+                   let title = titleRef as? String {
+                    DebugLog.log("[GhosttyHelper] Selected tab title: '\(title)'")
+                    return title
+                }
+            }
+        }
+
+        return nil
+    }
 
     /// Get the index of the currently selected tab (0-based)
     /// Returns nil if no tab is selected or error occurs
