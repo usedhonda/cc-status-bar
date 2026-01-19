@@ -1,11 +1,12 @@
 import AppKit
 import Combine
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
     private let animationManager = AnimationManager.shared
+    private var isMenuOpen = false
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -23,10 +24,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Setup animation callback
+        // Setup animation callback - only rebuild menu when open (for running session spinners)
         animationManager.onFrameUpdate = { [weak self] in
-            self?.updateStatusTitle()
-            self?.rebuildMenu()
+            if self?.isMenuOpen == true {
+                self?.rebuildMenu()
+            }
         }
 
         // Subscribe to session changes
@@ -86,17 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ccColor = .white
         }
 
-        // Spinner for green sessions (running)
-        if greenCount > 0 && redCount == 0 && yellowCount == 0 && animationManager.isAnimating {
-            let spinnerAttr = NSAttributedString(
-                string: "\(animationManager.currentSpinnerFrame) ",
-                attributes: [
-                    .foregroundColor: NSColor.systemGreen,
-                    .font: NSFont.systemFont(ofSize: 13, weight: .medium)
-                ]
-            )
-            attributed.append(spinnerAttr)
-        }
+        // No spinner in menu bar - just static "CC"
 
         // "CC" with color
         let ccAttr = NSAttributedString(
@@ -159,8 +151,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Update animation state based on session counts
     @MainActor
     private func updateAnimationState() {
-        // Animate when there are running sessions (green) to show activity
-        let needsAnimation = sessionObserver.displayedGreenCount > 0
+        // Animate only when tools are actively running (PreToolUse..PostToolUse)
+        let needsAnimation = sessionObserver.toolRunningCount > 0
         if needsAnimation && !animationManager.isAnimating {
             animationManager.startAnimation()
         } else if !needsAnimation && animationManager.isAnimating {
@@ -217,7 +209,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "q"
         ))
 
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
     }
 
     @objc private func copyDiagnostics() {
@@ -384,10 +387,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Line 1: ● project-name (or spinner for running sessions)
+        // Line 1: ● project-name (or spinner when tool is running)
         let symbol: String
-        if session.status == .running && animationManager.isAnimating {
-            symbol = animationManager.currentSpinnerFrame  // Animated spinner for running
+        if session.isToolRunning == true && animationManager.isAnimating {
+            symbol = animationManager.currentSpinnerFrame  // Animated spinner for tool execution
         } else {
             symbol = displayStatus.symbol  // Static symbol (●, ◐, ✓)
         }

@@ -18,6 +18,7 @@ struct Session: Codable, Identifiable {
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain (e.g., "com.todesktop.230313mzl4w4u92" for Cursor)
     var editorPID: pid_t?  // Editor process ID for direct activation (reliable for multiple instances)
     var waitingReason: WaitingReason?  // Reason for waitingInput status (permissionPrompt=red, stop/unknown=yellow)
+    var isToolRunning: Bool?  // true during PreToolUse..PostToolUse (show spinner)
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -50,5 +51,6 @@ struct Session: Codable, Identifiable {
         case editorBundleID = "editor_bundle_id"
         case editorPID = "editor_pid"
         case waitingReason = "waiting_reason"
+        case isToolRunning = "is_tool_running"
     }
 }

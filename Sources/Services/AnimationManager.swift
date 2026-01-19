@@ -21,7 +21,7 @@ final class AnimationManager {
     /// Whether animation is currently running
     var isAnimating: Bool { timer != nil }
 
-    /// Start the spinner animation (100ms interval)
+    /// Start the spinner animation (300ms interval - slower for less CPU usage)
     func startAnimation() {
         guard timer == nil else { return }
 
@@ -31,7 +31,7 @@ final class AnimationManager {
             return
         }
 
-        timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.frameIndex += 1
                 self?.onFrameUpdate?()

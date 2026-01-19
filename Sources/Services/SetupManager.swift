@@ -286,51 +286,57 @@ final class SetupManager {
         var needsUpdate = false
 
         for eventName in Self.hookEvents {
-            // First, remove ALL existing CCStatusBar hooks (prevents duplicates)
+            // Process existing hooks for this event
             var filtered: [[String: Any]] = []
-            var hadExistingHook = false
+            var hadExistingCCStatusBarHook = false
+            var addedToExistingEntry = false
 
             if let eventHooks = hooks[eventName] {
-                for hookEntry in eventHooks {
-                    var isCCStatusBarHook = false
-                    if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
-                        for hook in innerHooks {
-                            if let command = hook["command"] as? String,
-                               command.contains("CCStatusBar") {
-                                isCCStatusBarHook = true
-                                hadExistingHook = true
-                                break
-                            }
-                        }
+                for var hookEntry in eventHooks {
+                    guard var innerHooks = hookEntry["hooks"] as? [[String: Any]] else {
+                        filtered.append(hookEntry)
+                        continue
                     }
-                    // Keep non-CCStatusBar hooks
-                    if !isCCStatusBarHook {
+
+                    // Check if this entry has a matcher
+                    let hasMatcher = hookEntry["matcher"] != nil
+
+                    // Remove any existing CCStatusBar hooks from this entry
+                    innerHooks = innerHooks.filter { hook in
+                        guard let command = hook["command"] as? String else { return true }
+                        if command.contains("CCStatusBar") {
+                            hadExistingCCStatusBarHook = true
+                            return false
+                        }
+                        return true
+                    }
+
+                    // If this entry has no matcher and still has other hooks,
+                    // add CCStatusBar hook to this entry (merge with existing)
+                    if !hasMatcher && !innerHooks.isEmpty && !addedToExistingEntry {
+                        innerHooks.append(["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"])
+                        addedToExistingEntry = true
+                    }
+
+                    // Keep this entry if it still has hooks
+                    if !innerHooks.isEmpty {
+                        hookEntry["hooks"] = innerHooks
                         filtered.append(hookEntry)
                     }
                 }
             }
 
-            // Now add exactly one CCStatusBar hook
-            let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
-            filtered.append(entry)
+            // If we didn't add to an existing entry, create a new one
+            if !addedToExistingEntry {
+                let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
+                filtered.append(entry)
+            }
+
             hooks[eventName] = filtered
 
-            // Track if we need to update (either removed duplicates or added new)
-            if !hadExistingHook {
+            // Track if we need to update
+            if !hadExistingCCStatusBarHook || addedToExistingEntry {
                 needsUpdate = true
-            } else {
-                // Check if we removed duplicates (had more than one CCStatusBar hook)
-                if let eventHooks = (settings["hooks"] as? [String: [[String: Any]]])?[eventName] {
-                    let ccHookCount = eventHooks.filter { entry in
-                        guard let innerHooks = entry["hooks"] as? [[String: Any]] else { return false }
-                        return innerHooks.contains { hook in
-                            (hook["command"] as? String)?.contains("CCStatusBar") == true
-                        }
-                    }.count
-                    if ccHookCount != 1 {
-                        needsUpdate = true
-                    }
-                }
             }
         }
 
