@@ -2,6 +2,31 @@ import AppKit
 import Carbon
 import ApplicationServices
 
+// MARK: - GhosttyAdapter (TerminalAdapter conformance)
+
+/// Adapter implementation for Ghostty terminal
+final class GhosttyAdapter: TerminalAdapter {
+    let name = "Ghostty"
+    let bundleIdentifier = "com.mitchellh.ghostty"
+    let capabilities: TerminalCapabilities = [.focusBySession, .activateOnly]
+
+    var isRunning: Bool {
+        GhosttyHelper.isRunning
+    }
+
+    func focusSession(_ sessionName: String) -> Bool {
+        GhosttyHelper.focusSession(sessionName)
+    }
+
+    func activate() -> Bool {
+        guard let pid = GhosttyHelper.ghosttyPid else { return false }
+        GhosttyHelper.activateGhostty(pid: pid)
+        return true
+    }
+}
+
+// MARK: - GhosttyHelper (static API for compatibility)
+
 enum GhosttyHelper {
     /// Check if Ghostty is running
     static var isRunning: Bool {
@@ -208,6 +233,102 @@ enum GhosttyHelper {
         return nil
     }
 
+    // MARK: - Tab Index Operations (Bind-on-start)
+
+    /// Get the index of the currently selected tab (0-based)
+    /// Returns nil if no tab is selected or error occurs
+    static func getSelectedTabIndex() -> Int? {
+        guard let pid = ghosttyPid else {
+            DebugLog.log("[GhosttyHelper] Ghostty not running")
+            return nil
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              let window = windows.first else {
+            DebugLog.log("[GhosttyHelper] Could not get windows")
+            return nil
+        }
+
+        guard let tabGroup = findElement(in: window, role: "AXTabGroup") else {
+            DebugLog.log("[GhosttyHelper] Could not find AXTabGroup")
+            return nil
+        }
+
+        var childrenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(tabGroup, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let tabs = childrenValue as? [AXUIElement] else {
+            DebugLog.log("[GhosttyHelper] Could not get tabs")
+            return nil
+        }
+
+        // Find the selected tab (AXValue == 1)
+        for (index, tab) in tabs.enumerated() {
+            var valueRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(tab, kAXValueAttribute as CFString, &valueRef) == .success,
+               let value = valueRef as? NSNumber,
+               value.intValue == 1 {
+                DebugLog.log("[GhosttyHelper] Selected tab index: \(index)")
+                return index
+            }
+        }
+
+        DebugLog.log("[GhosttyHelper] No selected tab found")
+        return nil
+    }
+
+    /// Focus a tab by its index (0-based)
+    /// Returns true if successful
+    static func focusTabByIndex(_ index: Int) -> Bool {
+        guard let pid = ghosttyPid else {
+            DebugLog.log("[GhosttyHelper] Ghostty not running")
+            return false
+        }
+
+        // Activate Ghostty first
+        activateGhostty(pid: pid)
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              let window = windows.first else {
+            DebugLog.log("[GhosttyHelper] Could not get windows")
+            return false
+        }
+
+        guard let tabGroup = findElement(in: window, role: "AXTabGroup") else {
+            DebugLog.log("[GhosttyHelper] Could not find AXTabGroup")
+            return false
+        }
+
+        var childrenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(tabGroup, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let tabs = childrenValue as? [AXUIElement] else {
+            DebugLog.log("[GhosttyHelper] Could not get tabs")
+            return false
+        }
+
+        guard index >= 0 && index < tabs.count else {
+            DebugLog.log("[GhosttyHelper] Tab index \(index) out of range (0..<\(tabs.count))")
+            return false
+        }
+
+        let tab = tabs[index]
+        let pressResult = AXUIElementPerformAction(tab, kAXPressAction as CFString)
+        if pressResult == .success {
+            DebugLog.log("[GhosttyHelper] Focused tab at index \(index)")
+            return true
+        } else {
+            DebugLog.log("[GhosttyHelper] Failed to focus tab at index \(index): \(pressResult.rawValue)")
+            return false
+        }
+    }
+
     // MARK: - Activation
 
     /// Activate Ghostty using NSRunningApplication
@@ -219,6 +340,80 @@ enum GhosttyHelper {
     }
 
     // MARK: - Debug helpers
+
+    /// Dump all AX attributes for a tab element (for investigation)
+    static func dumpTabAttributes() {
+        guard let pid = ghosttyPid else {
+            DebugLog.log("[GhosttyHelper] Ghostty not running")
+            return
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              let window = windows.first else {
+            DebugLog.log("[GhosttyHelper] Could not get windows")
+            return
+        }
+
+        // Find tab group and dump attributes
+        if let tabGroup = findElement(in: window, role: "AXTabGroup") {
+            var childrenValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(tabGroup, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+               let tabs = childrenValue as? [AXUIElement] {
+                for (i, tab) in tabs.enumerated() {
+                    DebugLog.log("[GhosttyHelper] === Tab \(i) attributes ===")
+                    dumpAllAttributes(of: tab)
+                }
+            }
+        }
+
+        // Also dump window attributes
+        DebugLog.log("[GhosttyHelper] === Window attributes ===")
+        dumpAllAttributes(of: window)
+    }
+
+    /// Dump all attributes of an AX element
+    private static func dumpAllAttributes(of element: AXUIElement) {
+        var namesRef: CFArray?
+        let result = AXUIElementCopyAttributeNames(element, &namesRef)
+        guard result == .success, let names = namesRef as? [String] else {
+            DebugLog.log("[GhosttyHelper] Could not get attribute names")
+            return
+        }
+
+        for name in names {
+            var valueRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, name as CFString, &valueRef) == .success {
+                let valueStr = describeValue(valueRef)
+                DebugLog.log("[GhosttyHelper]   \(name) = \(valueStr)")
+            }
+        }
+    }
+
+    /// Describe a CFTypeRef value for logging
+    private static func describeValue(_ value: CFTypeRef?) -> String {
+        guard let value = value else { return "nil" }
+
+        if let str = value as? String {
+            return "\"\(str)\""
+        } else if let num = value as? NSNumber {
+            return "\(num)"
+        } else if let url = value as? URL {
+            return "URL(\(url.absoluteString))"
+        } else if let arr = value as? [Any] {
+            return "Array(\(arr.count) items)"
+        } else if CFGetTypeID(value) == AXUIElementGetTypeID() {
+            var roleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(value as! AXUIElement, kAXRoleAttribute as CFString, &roleRef)
+            let role = roleRef as? String ?? "?"
+            return "AXUIElement(\(role))"
+        } else {
+            return "\(type(of: value))"
+        }
+    }
 
     /// Get all tab titles for debugging
     static func getAllTabTitles() -> [String] {

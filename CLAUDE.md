@@ -24,6 +24,10 @@ Sources/
 │   ├── SessionStore.swift     # Session CRUD
 │   ├── TtyDetector.swift      # TTY detection
 │   ├── SetupManager.swift     # First-run setup, hooks
+│   ├── TerminalAdapter.swift  # Terminal adapter protocol
+│   ├── GhosttyHelper.swift    # Ghostty tab control (Accessibility API)
+│   ├── ITerm2Helper.swift     # iTerm2 tab control (AppleScript TTY search)
+│   ├── TmuxHelper.swift       # tmux pane control
 │   └── DebugLog.swift         # Debug logging
 ├── Models/
 │   ├── Session.swift          # Session model
@@ -45,9 +49,12 @@ Sources/
 pkill -f CCStatusBar
 swift build
 cp .build/debug/CCStatusBar CCStatusBar.app/Contents/MacOS/
-codesign --force --deep --sign - CCStatusBar.app
+codesign --force --deep --sign "CCStatusBar Dev" CCStatusBar.app
 open CCStatusBar.app
 ```
+
+**Note**: Use self-signed certificate "CCStatusBar Dev" to preserve Accessibility permissions across rebuilds.
+See `plans/crystalline-humming-stardust.md` for certificate setup and distribution signing requirements.
 
 ## Data Source
 

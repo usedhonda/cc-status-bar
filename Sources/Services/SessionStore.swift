@@ -57,13 +57,26 @@ final class SessionStore {
             existing.updatedAt = now
             session = existing
         } else {
+            // New session - capture Ghostty tab index for Bind-on-start
+            var tabIndex: Int? = nil
+            if event.hookEventName == .sessionStart && GhosttyHelper.isRunning {
+                // Only bind tab for non-tmux sessions (tmux uses title search)
+                if let tty = event.tty, TmuxHelper.getPaneInfo(for: tty) == nil {
+                    tabIndex = GhosttyHelper.getSelectedTabIndex()
+                    if let idx = tabIndex {
+                        DebugLog.log("[SessionStore] Bind-on-start: captured tab index \(idx) for session \(event.sessionId)")
+                    }
+                }
+            }
+
             session = Session(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
                 tty: event.tty,
                 status: determineStatus(event: event, current: nil),
                 createdAt: now,
-                updatedAt: now
+                updatedAt: now,
+                ghosttyTabIndex: tabIndex
             )
         }
 
