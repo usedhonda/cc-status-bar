@@ -19,22 +19,32 @@ enum ITerm2Helper {
         ).first
     }
 
-    /// Focus session by TTY using AppleScript whose clause (Gemini optimized)
+    /// Focus session by TTY using AppleScript
     /// - Parameter tty: The TTY device path (e.g., "/dev/ttys002")
     /// - Returns: true if successfully focused
     static func focusSessionByTTY(_ tty: String) -> Bool {
         // Escape the TTY string for AppleScript
         let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
 
+        // Iterate through all sessions to find matching TTY,
+        // then explicitly select session, tab, and window
         let script = """
             tell application "iTerm"
                 try
-                    set targetSession to (first session of every tab of every window whose tty is "\(escapedTTY)")
-                    tell targetSession
-                        select
-                    end tell
-                    activate
-                    return "true"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            repeat with s in sessions of t
+                                if tty of s is "\(escapedTTY)" then
+                                    tell s to select
+                                    select t
+                                    select w
+                                    activate
+                                    return "true"
+                                end if
+                            end repeat
+                        end repeat
+                    end repeat
+                    return "false"
                 on error errMsg
                     return "false"
                 end try

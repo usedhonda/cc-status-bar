@@ -58,7 +58,9 @@ final class SessionStore {
         var session = ccsbEvent.toSession(existingSession: existing)
 
         // Capture Ghostty tab index for Bind-on-start on new sessions
-        if existing == nil && ccsbEvent.event == .sessionStart && GhosttyHelper.isRunning {
+        // Note: CCSB events don't have termProgram, so we check if Ghostty is the only terminal running
+        // TODO: Add termProgram to CCSB protocol for accurate detection
+        if existing == nil && ccsbEvent.event == .sessionStart && GhosttyHelper.isRunning && !ITerm2Helper.isRunning {
             if let tty = ccsbEvent.tty, TmuxHelper.getPaneInfo(for: tty) == nil {
                 session.ghosttyTabIndex = GhosttyHelper.getSelectedTabIndex()
                 if let idx = session.ghosttyTabIndex {
@@ -128,12 +130,17 @@ final class SessionStore {
             if existing.editorBundleID == nil, let bundleID = event.editorBundleID {
                 existing.editorBundleID = bundleID
             }
+            // Update editorPID if provided (first value wins)
+            if existing.editorPID == nil, let pid = event.editorPID {
+                existing.editorPID = pid
+            }
             session = existing
         } else {
             // New session - capture Ghostty tab index for Bind-on-start
             var tabIndex: Int? = nil
-            if event.hookEventName == .sessionStart && GhosttyHelper.isRunning {
-                // Only bind tab for non-tmux sessions (tmux uses title search)
+            let isGhosttySession = event.termProgram?.lowercased() == "ghostty"
+            if event.hookEventName == .sessionStart && isGhosttySession && GhosttyHelper.isRunning {
+                // Only bind tab for non-tmux Ghostty sessions (tmux uses title search)
                 if let tty = event.tty, TmuxHelper.getPaneInfo(for: tty) == nil {
                     tabIndex = GhosttyHelper.getSelectedTabIndex()
                     if let idx = tabIndex {
@@ -151,7 +158,8 @@ final class SessionStore {
                 updatedAt: now,
                 ghosttyTabIndex: tabIndex,
                 termProgram: event.termProgram,
-                editorBundleID: event.editorBundleID
+                editorBundleID: event.editorBundleID,
+                editorPID: event.editorPID
             )
         }
 
