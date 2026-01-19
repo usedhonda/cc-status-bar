@@ -50,7 +50,6 @@ final class SessionStore {
         // Create or update session
         let now = Date()
         var session: Session
-        let oldStatus = data.sessions[key]?.status
 
         if var existing = data.sessions[key] {
             existing.status = determineStatus(event: event, current: existing.status)
@@ -90,11 +89,8 @@ final class SessionStore {
 
         saveData(data)
 
-        // Send notification if status changed to waitingInput
-        if session.status == .waitingInput && oldStatus != .waitingInput {
-            NotificationManager.shared.notifyWaitingInput(projectName: session.projectName)
-            DebugLog.log("[SessionStore] Notification sent for: \(session.projectName)")
-        }
+        // Note: Notifications are sent from SessionObserver (GUI) to respect user settings
+        // CLI process cannot reliably read UserDefaults set by GUI
 
         return session
     }

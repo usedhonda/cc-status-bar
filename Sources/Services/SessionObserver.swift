@@ -9,6 +9,7 @@ final class SessionObserver: ObservableObject {
     private var fileDescriptor: Int32 = -1
     private var dispatchSource: DispatchSourceFileSystemObject?
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
+    private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
 
     var runningCount: Int {
         sessions.filter { $0.status == .running }.count
@@ -52,12 +53,29 @@ final class SessionObserver: ObservableObject {
             // Bind-on-start: Detect new sessions and capture Ghostty tab index
             captureGhosttyTabIndexForNewSessions(loadedSessions, storeData: storeData)
 
-            // Update previous session IDs
+            // Send notifications for sessions that changed to waitingInput
+            sendNotificationsForWaitingSessions(loadedSessions)
+
+            // Update tracking
             previousSessionIds = Set(loadedSessions.map { $0.id })
+            previousSessionStatuses = Dictionary(uniqueKeysWithValues: loadedSessions.map { ($0.id, $0.status) })
             sessions = loadedSessions
         } catch {
             sessions = []
             previousSessionIds = []
+            previousSessionStatuses = [:]
+        }
+    }
+
+    // MARK: - Notifications
+
+    private func sendNotificationsForWaitingSessions(_ loadedSessions: [Session]) {
+        for session in loadedSessions {
+            // Check if status changed to waitingInput
+            let oldStatus = previousSessionStatuses[session.id]
+            if session.status == .waitingInput && oldStatus != .waitingInput {
+                NotificationManager.shared.notifyWaitingInput(projectName: session.projectName)
+            }
         }
     }
 
