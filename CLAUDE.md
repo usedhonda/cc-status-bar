@@ -75,6 +75,11 @@ Monitors `~/Library/Application Support/CCStatusBar/sessions.json`
 }
 ```
 
+## Specification Document
+
+UI/behavior specifications are documented in `docs/SPEC.md`.
+**Before any modification, read the spec. After modification, update the spec if behavior changed.**
+
 ## Key Components
 
 ### AppDelegate.swift

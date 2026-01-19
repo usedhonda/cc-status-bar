@@ -16,15 +16,27 @@ final class ITerm2Controller: TerminalController {
 
     // MARK: - TerminalController
 
-    func focus(session: Session) -> FocusResult {
+    /// Focus with pre-resolved environment parameters
+    /// - Parameters:
+    ///   - session: The session to focus
+    ///   - hasTmux: Whether tmux is involved (resolved by EnvironmentResolver)
+    ///   - tmuxSessionName: tmux session name if available
+    func focus(
+        session: Session,
+        hasTmux: Bool,
+        tmuxSessionName: String?
+    ) -> FocusResult {
         guard isRunning else {
             return .notRunning
         }
 
         let projectName = session.projectName
 
-        // 1. Select tmux pane if needed
-        let tmuxSessionName = selectTmuxPaneIfNeeded(for: session)
+        // 1. Select tmux pane if needed (already known via resolver)
+        if hasTmux, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            _ = TmuxHelper.selectPane(paneInfo)
+            DebugLog.log("[ITerm2Controller] Selected tmux pane")
+        }
 
         // 2. Try TTY-based search (works for non-tmux sessions)
         if let tty = session.tty {
@@ -51,7 +63,7 @@ final class ITerm2Controller: TerminalController {
         activate()
 
         // If we at least selected tmux pane, it's partial success
-        if tmuxSessionName != nil {
+        if hasTmux {
             return .partialSuccess(reason: "tmux pane selected, but tab '\(searchTerm)' not found")
         }
 

@@ -42,9 +42,12 @@ enum FocusResult: CustomStringConvertible {
 
 // MARK: - Terminal Controller Protocol
 
-/// Protocol for terminal-specific focus implementations
+/// Protocol for terminal-specific implementations
 /// Each terminal (Ghostty, iTerm2, Terminal.app) implements this protocol
-/// The controller handles both terminal tab switching AND tmux pane selection internally
+///
+/// Note: The focus() method is NOT part of the protocol because each controller
+/// has different parameters. FocusManager uses EnvironmentResolver to determine
+/// the environment and calls the appropriate controller method directly.
 protocol TerminalController {
     /// Display name for logging
     var name: String { get }
@@ -55,35 +58,8 @@ protocol TerminalController {
     /// Check if terminal application is currently running
     var isRunning: Bool { get }
 
-    /// Focus the terminal for a given session
-    /// This method should:
-    /// 1. Select tmux pane if session is in tmux
-    /// 2. Focus the correct terminal tab/window
-    /// 3. Activate the terminal application
-    /// - Parameter session: The session to focus
-    /// - Returns: FocusResult indicating success or failure with details
-    func focus(session: Session) -> FocusResult
-
     /// Simply activate the terminal application (bring to front)
     /// - Returns: true if successfully activated
     @discardableResult
     func activate() -> Bool
-}
-
-// MARK: - Default Implementation
-
-extension TerminalController {
-    /// Helper to select tmux pane for a session
-    /// - Parameter session: The session to check for tmux
-    /// - Returns: tmux session name if tmux pane was selected, nil otherwise
-    func selectTmuxPaneIfNeeded(for session: Session) -> String? {
-        guard let tty = session.tty,
-              let paneInfo = TmuxHelper.getPaneInfo(for: tty) else {
-            return nil
-        }
-
-        _ = TmuxHelper.selectPane(paneInfo)
-        DebugLog.log("[\(name)] Selected tmux pane: \(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)")
-        return paneInfo.session
-    }
 }

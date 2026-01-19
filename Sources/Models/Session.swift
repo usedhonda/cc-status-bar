@@ -1,5 +1,11 @@
 import Foundation
 
+enum WaitingReason: String, Codable {
+    case permissionPrompt = "permission_prompt"  // Red - permission/choice waiting
+    case stop = "stop"                           // Yellow - command completion waiting
+    case unknown = "unknown"                     // Yellow - legacy/unknown reason
+}
+
 struct Session: Codable, Identifiable {
     let sessionId: String
     let cwd: String
@@ -10,6 +16,8 @@ struct Session: Codable, Identifiable {
     var ghosttyTabIndex: Int?  // Bind-on-start: tab index at session start
     var termProgram: String?   // TERM_PROGRAM environment variable (legacy, kept for compatibility)
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain (e.g., "com.todesktop.230313mzl4w4u92" for Cursor)
+    var editorPID: pid_t?  // Editor process ID for direct activation (reliable for multiple instances)
+    var waitingReason: WaitingReason?  // Reason for waitingInput status (permissionPrompt=red, stop/unknown=yellow)
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -25,51 +33,9 @@ struct Session: Codable, Identifiable {
 
     /// Environment label showing terminal and tmux status
     /// e.g., "Ghostty/tmux", "iTerm2", "Ghostty", "VS Code", "Cursor", "Zed"
+    /// Delegates to EnvironmentResolver for single source of truth
     var environmentLabel: String {
-        let tmuxPane = tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
-        let hasTmux = tmuxPane != nil
-
-        // Priority 1: Use detected editor bundle ID (most accurate)
-        if let bundleID = editorBundleID,
-           let editorName = EditorDetector.shared.displayName(for: bundleID) {
-            return hasTmux ? "\(editorName)/tmux" : editorName
-        }
-
-        // Priority 2: Fallback to TERM_PROGRAM for backward compatibility
-        if let prog = termProgram?.lowercased() {
-            switch prog {
-            case "zed":
-                return hasTmux ? "Zed/tmux" : "Zed"
-            default:
-                break
-            }
-        }
-
-        // Terminal detection (Ghostty, iTerm2, etc.)
-        if let pane = tmuxPane {
-            // tmux session - check if Ghostty has a tab with this session name
-            if GhosttyHelper.isRunning && GhosttyHelper.hasTabWithTitle(pane.session) {
-                return "Ghostty/tmux"
-            }
-            // Check if iTerm2 is running for tmux
-            if ITerm2Helper.isRunning {
-                return "iTerm2/tmux"
-            }
-            return "tmux"
-        }
-
-        // Non-tmux: check specific evidence
-        if ghosttyTabIndex != nil {
-            return "Ghostty"
-        }
-
-        // Check if iTerm2 is running and this TTY belongs to it
-        if ITerm2Helper.isRunning {
-            return "iTerm2"
-        }
-
-        // No specific evidence - don't guess
-        return "Terminal"
+        EnvironmentResolver.shared.resolve(session: self).displayName
     }
 
     enum CodingKeys: String, CodingKey {
@@ -82,5 +48,7 @@ struct Session: Codable, Identifiable {
         case ghosttyTabIndex = "ghostty_tab_index"
         case termProgram = "term_program"
         case editorBundleID = "editor_bundle_id"
+        case editorPID = "editor_pid"
+        case waitingReason = "waiting_reason"
     }
 }

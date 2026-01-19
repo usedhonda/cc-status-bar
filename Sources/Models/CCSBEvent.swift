@@ -149,8 +149,11 @@ extension CCSBEvent {
 
         case .notification:
             eventType = .sessionWaiting
-            let reason = hookEvent.notificationType ?? "Waiting for input"
-            attention = CCSBAttentionInfo(level: .yellow, reason: reason)
+            let reason = hookEvent.notificationType ?? hookEvent.message ?? "Waiting for input"
+            // Red for permission_prompt, yellow for other notifications
+            // Use isPermissionPrompt which checks both notification_type and message content
+            let level: CCSBAttentionLevel = hookEvent.isPermissionPrompt ? .red : .yellow
+            attention = CCSBAttentionInfo(level: level, reason: reason)
             summary = "Waiting for input"
 
         case .userPromptSubmit:
@@ -178,15 +181,22 @@ extension CCSBEvent {
     /// Convert to internal Session model
     func toSession(existingSession: Session? = nil) -> Session {
         let status: SessionStatus
+        let waitingReason: WaitingReason?
+
         switch event {
         case .sessionStart, .sessionRunning:
             status = .running
+            waitingReason = nil
         case .sessionWaiting:
             status = .waitingInput
+            // Determine waitingReason from attention level
+            waitingReason = (attention.level == .red) ? .permissionPrompt : .stop
         case .sessionStop:
             status = .stopped
+            waitingReason = nil
         case .artifactLink:
             status = existingSession?.status ?? .running
+            waitingReason = existingSession?.waitingReason
         }
 
         return Session(
@@ -196,7 +206,8 @@ extension CCSBEvent {
             status: status,
             createdAt: existingSession?.createdAt ?? timestamp,
             updatedAt: timestamp,
-            ghosttyTabIndex: existingSession?.ghosttyTabIndex
+            ghosttyTabIndex: existingSession?.ghosttyTabIndex,
+            waitingReason: waitingReason
         )
     }
 }

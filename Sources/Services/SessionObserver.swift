@@ -28,6 +28,33 @@ final class SessionObserver: ObservableObject {
         }.count
     }
 
+    /// Red waiting sessions (permission_prompt) that haven't been acknowledged
+    var unacknowledgedRedCount: Int {
+        sessions.filter {
+            $0.status == .waitingInput &&
+            $0.waitingReason == .permissionPrompt &&
+            !acknowledgedSessionIds.contains($0.id)
+        }.count
+    }
+
+    /// Yellow waiting sessions (stop/unknown) that haven't been acknowledged
+    var unacknowledgedYellowCount: Int {
+        sessions.filter {
+            $0.status == .waitingInput &&
+            $0.waitingReason != .permissionPrompt &&
+            !acknowledgedSessionIds.contains($0.id)
+        }.count
+    }
+
+    /// Sessions displayed as green (running + acknowledged waiting)
+    var displayedGreenCount: Int {
+        let running = sessions.filter { $0.status == .running }.count
+        let acknowledgedWaiting = sessions.filter {
+            $0.status == .waitingInput && acknowledgedSessionIds.contains($0.id)
+        }.count
+        return running + acknowledgedWaiting
+    }
+
     var hasActiveSessions: Bool {
         !sessions.isEmpty
     }

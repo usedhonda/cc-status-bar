@@ -66,11 +66,19 @@ This preserves project-based tab titles and enables reliable tab switching.
 ## Installation
 
 ### From Release
+
 1. Download `CCStatusBar.app.zip` from [Releases](../../releases)
 2. Unzip and move to `/Applications`
-3. Double-click to launch
+3. **First launch** (Gatekeeper bypass required for self-signed builds):
+   - Right-click (or Control-click) `CCStatusBar.app`
+   - Select "Open" from the context menu
+   - Click "Open" in the warning dialog
+   - This is only required once; subsequent launches work normally
 4. Grant Accessibility permission when prompted
 5. Follow the setup wizard
+
+> **Note**: The app is self-signed until Apple Developer Program enrollment completes.
+> After enrollment, future releases will be notarized and won't show the Gatekeeper warning.
 
 ### From Source
 ```bash
