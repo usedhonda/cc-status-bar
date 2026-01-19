@@ -2,12 +2,15 @@
 
 A native macOS menu bar app for real-time monitoring of Claude Code sessions.
 
+![Screenshot](assets/screenshot.png)
+
 ## Features
 
 ### Menu Bar Display
-- **Green CC N** = N sessions running
-- **Yellow CC N** = N sessions waiting for input (priority display)
-- **White CC** = Idle (no active sessions)
+- **🟢 Green + Spinner** = Sessions running (animated)
+- **🔴 Red** = Permission prompt waiting (highest priority)
+- **🟡 Yellow** = Command completion waiting
+- **⚪ White CC** = Idle (no active sessions)
 
 ### Session List
 Click the menu to see session details:
@@ -67,18 +70,13 @@ This preserves project-based tab titles and enables reliable tab switching.
 
 ### From Release
 
-1. Download `CCStatusBar.app.zip` from [Releases](../../releases)
-2. Unzip and move to `/Applications`
-3. **First launch** (Gatekeeper bypass required for self-signed builds):
-   - Right-click (or Control-click) `CCStatusBar.app`
-   - Select "Open" from the context menu
-   - Click "Open" in the warning dialog
-   - This is only required once; subsequent launches work normally
+1. Download `CCStatusBar.dmg` from [Releases](../../releases)
+2. Open DMG and drag `CCStatusBar.app` to Applications
+3. Launch from Applications
 4. Grant Accessibility permission when prompted
 5. Follow the setup wizard
 
-> **Note**: The app is self-signed until Apple Developer Program enrollment completes.
-> After enrollment, future releases will be notarized and won't show the Gatekeeper warning.
+> **Note**: The app is notarized by Apple, so it opens without Gatekeeper warnings.
 
 ### From Source
 ```bash
