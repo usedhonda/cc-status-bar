@@ -31,12 +31,21 @@ struct Session: Codable, Identifiable {
             if GhosttyHelper.isRunning && GhosttyHelper.hasTabWithTitle(pane.session) {
                 return "Ghostty/tmux"
             }
+            // Check if iTerm2 is running for tmux
+            if ITerm2Helper.isRunning {
+                return "iTerm2/tmux"
+            }
             return "tmux"
         }
 
         // Non-tmux: check specific evidence
         if ghosttyTabIndex != nil {
             return "Ghostty"
+        }
+
+        // Check if iTerm2 is running and this TTY belongs to it
+        if ITerm2Helper.isRunning {
+            return "iTerm2"
         }
 
         // No specific evidence - don't guess

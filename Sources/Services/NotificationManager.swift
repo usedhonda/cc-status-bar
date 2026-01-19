@@ -1,4 +1,9 @@
 import UserNotifications
+import Foundation
+
+extension NSNotification.Name {
+    static let acknowledgeSession = NSNotification.Name("acknowledgeSession")
+}
 
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
@@ -51,12 +56,35 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func notifyWaitingInput(projectName: String) {
-        notify(
-            title: projectName,
-            body: "Waiting for input",
-            sessionName: projectName
+    func notifyWaitingInput(session: Session) {
+        guard AppSettings.notificationsEnabled else { return }
+
+        DebugLog.log("[NotificationManager] Sending: \(session.projectName) - Waiting for input")
+
+        let content = UNMutableNotificationContent()
+        content.title = session.projectName
+        content.body = "Waiting for input • \(session.environmentLabel)"
+        content.sound = .default
+
+        // Store full session info for click callback
+        content.userInfo = [
+            "sessionId": session.sessionId,
+            "cwd": session.cwd,
+            "tty": session.tty ?? "",
+            "ghosttyTabIndex": session.ghosttyTabIndex ?? -1
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
         )
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                DebugLog.log("[NotificationManager] UNUserNotification failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func notifySessionTimeout(projectName: String) {
@@ -88,12 +116,40 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         DebugLog.log("[NotificationManager] Notification clicked: \(userInfo)")
 
-        if let sessionName = userInfo["sessionName"] as? String {
-            DebugLog.log("[NotificationManager] Focusing session: \(sessionName)")
-            // Focus the Ghostty tab for this session
-            DispatchQueue.main.async {
-                _ = GhosttyHelper.focusSession(sessionName)
-            }
+        // Reconstruct session from userInfo
+        guard let sessionId = userInfo["sessionId"] as? String,
+              let cwd = userInfo["cwd"] as? String else {
+            DebugLog.log("[NotificationManager] Missing session info in notification")
+            completionHandler()
+            return
+        }
+
+        let ttyString = userInfo["tty"] as? String
+        let tty = (ttyString?.isEmpty == false) ? ttyString : nil
+        let tabIndex = userInfo["ghosttyTabIndex"] as? Int
+        let ghosttyTabIndex = (tabIndex == -1) ? nil : tabIndex
+
+        // Create session for focus
+        let session = Session(
+            sessionId: sessionId,
+            cwd: cwd,
+            tty: tty,
+            status: .waitingInput,
+            createdAt: Date(),
+            updatedAt: Date(),
+            ghosttyTabIndex: ghosttyTabIndex
+        )
+
+        DebugLog.log("[NotificationManager] Focusing session: \(session.projectName)")
+
+        DispatchQueue.main.async {
+            // Post notification to acknowledge the session
+            NotificationCenter.default.post(
+                name: .acknowledgeSession,
+                object: nil,
+                userInfo: ["sessionId": session.id]
+            )
+            FocusManager.shared.focus(session: session)
         }
 
         completionHandler()

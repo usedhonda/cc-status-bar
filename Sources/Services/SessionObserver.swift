@@ -11,6 +11,7 @@ final class SessionObserver: ObservableObject {
     private var dispatchSource: DispatchSourceFileSystemObject?
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
     private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
+    private var acknowledgedSessionIds: Set<String> = []  // Sessions user has seen (for yellow->green)
 
     var runningCount: Int {
         sessions.filter { $0.status == .running }.count
@@ -20,8 +21,51 @@ final class SessionObserver: ObservableObject {
         sessions.filter { $0.status == .waitingInput }.count
     }
 
+    /// Waiting sessions that haven't been acknowledged (for menu bar count)
+    var unacknowledgedWaitingCount: Int {
+        sessions.filter {
+            $0.status == .waitingInput && !acknowledgedSessionIds.contains($0.id)
+        }.count
+    }
+
     var hasActiveSessions: Bool {
         !sessions.isEmpty
+    }
+
+    // MARK: - Acknowledge (for yellow->green on focus)
+
+    /// Mark a session as acknowledged (user has seen it)
+    func acknowledge(sessionId: String) {
+        acknowledgedSessionIds.insert(sessionId)
+        objectWillChange.send()
+        DebugLog.log("[SessionObserver] Acknowledged session: \(sessionId)")
+    }
+
+    /// Find session by TTY
+    func session(byTTY tty: String) -> Session? {
+        sessions.first { $0.tty == tty }
+    }
+
+    /// Find session by Ghostty tab index
+    func session(byTabIndex index: Int) -> Session? {
+        sessions.first { $0.ghosttyTabIndex == index }
+    }
+
+    /// Find session by tab title (matches project name or tmux session name)
+    func session(byTabTitle title: String) -> Session? {
+        // First, try exact project name match
+        if let session = sessions.first(where: { title.contains($0.projectName) }) {
+            return session
+        }
+        // Then try tmux session name from TTY
+        for session in sessions {
+            if let tty = session.tty,
+               let paneInfo = TmuxHelper.getPaneInfo(for: tty),
+               title.contains(paneInfo.session) {
+                return session
+            }
+        }
+        return nil
     }
 
     init() {
@@ -49,13 +93,31 @@ final class SessionObserver: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let storeData = try decoder.decode(StoreData.self, from: data)
-            let loadedSessions = storeData.activeSessions
+            var loadedSessions = storeData.activeSessions
+
+            // Filter out sessions with invalid TTYs (e.g., after Mac restart)
+            let validSessions = loadedSessions.filter { session in
+                guard let tty = session.tty, !tty.isEmpty else { return true }
+                return FileManager.default.fileExists(atPath: tty)
+            }
+
+            // Clean up invalid sessions from persistent store if any were removed
+            if validSessions.count < loadedSessions.count {
+                let invalidCount = loadedSessions.count - validSessions.count
+                DebugLog.log("[SessionObserver] Removed \(invalidCount) session(s) with invalid TTY")
+                cleanupInvalidSessions(validIds: Set(validSessions.map { $0.id }))
+            }
+
+            loadedSessions = validSessions
 
             // Bind-on-start: Detect new sessions and capture Ghostty tab index
             captureGhosttyTabIndexForNewSessions(loadedSessions, storeData: storeData)
 
             // Send notifications for sessions that changed to waitingInput
             sendNotificationsForWaitingSessions(loadedSessions)
+
+            // Clear acknowledged flag for sessions that returned to running
+            cleanupAcknowledgedSessions(loadedSessions)
 
             // Update tracking
             previousSessionIds = Set(loadedSessions.map { $0.id })
@@ -75,8 +137,18 @@ final class SessionObserver: ObservableObject {
             // Check if status changed to waitingInput
             let oldStatus = previousSessionStatuses[session.id]
             if session.status == .waitingInput && oldStatus != .waitingInput {
-                NotificationManager.shared.notifyWaitingInput(projectName: session.projectName)
+                NotificationManager.shared.notifyWaitingInput(session: session)
             }
+        }
+    }
+
+    /// Clear acknowledged flag when sessions return to running
+    private func cleanupAcknowledgedSessions(_ loadedSessions: [Session]) {
+        let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
+        let cleared = acknowledgedSessionIds.intersection(runningIds)
+        if !cleared.isEmpty {
+            acknowledgedSessionIds.subtract(runningIds)
+            DebugLog.log("[SessionObserver] Cleared acknowledged for running sessions: \(cleared)")
         }
     }
 
@@ -150,6 +222,36 @@ final class SessionObserver: ObservableObject {
         return runningApps.contains { app in
             guard let bundleId = app.bundleIdentifier else { return false }
             return otherTerminals.contains(bundleId)
+        }
+    }
+
+    /// Remove sessions with invalid TTYs from the persistent store
+    private func cleanupInvalidSessions(validIds: Set<String>) {
+        guard FileManager.default.fileExists(atPath: storeFile.path) else { return }
+
+        do {
+            let data = try Data(contentsOf: storeFile)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var storeData = try decoder.decode(StoreData.self, from: data)
+
+            // Remove sessions that are not in the valid set
+            let originalCount = storeData.sessions.count
+            storeData.sessions = storeData.sessions.filter { validIds.contains($0.key) }
+
+            if storeData.sessions.count < originalCount {
+                storeData.updatedAt = Date()
+
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let jsonData = try encoder.encode(storeData)
+                try jsonData.write(to: storeFile)
+
+                DebugLog.log("[SessionObserver] Cleaned up \(originalCount - storeData.sessions.count) invalid session(s)")
+            }
+        } catch {
+            DebugLog.log("[SessionObserver] Failed to cleanup invalid sessions: \(error)")
         }
     }
 
