@@ -8,6 +8,7 @@ final class SessionObserver: ObservableObject {
     private let storeFile: URL
     private var fileDescriptor: Int32 = -1
     private var dispatchSource: DispatchSourceFileSystemObject?
+    private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
 
     var runningCount: Int {
         sessions.filter { $0.status == .running }.count
@@ -37,6 +38,7 @@ final class SessionObserver: ObservableObject {
     private func loadSessions() {
         guard FileManager.default.fileExists(atPath: storeFile.path) else {
             sessions = []
+            previousSessionIds = []
             return
         }
 
@@ -45,9 +47,75 @@ final class SessionObserver: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let storeData = try decoder.decode(StoreData.self, from: data)
-            sessions = storeData.activeSessions
+            let loadedSessions = storeData.activeSessions
+
+            // Bind-on-start: Detect new sessions and capture Ghostty tab index
+            captureGhosttyTabIndexForNewSessions(loadedSessions, storeData: storeData)
+
+            // Update previous session IDs
+            previousSessionIds = Set(loadedSessions.map { $0.id })
+            sessions = loadedSessions
         } catch {
             sessions = []
+            previousSessionIds = []
+        }
+    }
+
+    // MARK: - Bind-on-start: Capture Ghostty Tab Index
+
+    private func captureGhosttyTabIndexForNewSessions(_ loadedSessions: [Session], storeData: StoreData) {
+        // Only if Ghostty is running
+        guard GhosttyHelper.isRunning else { return }
+
+        let now = Date()
+        let maxAge: TimeInterval = 5.0  // Only capture if session started within last 5 seconds
+
+        // Find new sessions that need tab index
+        let newSessions = loadedSessions.filter { session in
+            // Must be a new session (not previously known)
+            !previousSessionIds.contains(session.id) &&
+            // Must not already have a tab index
+            session.ghosttyTabIndex == nil &&
+            // Must not be a tmux session (tmux uses title search)
+            (session.tty == nil || TmuxHelper.getPaneInfo(for: session.tty!) == nil) &&
+            // Must be recently created (within maxAge seconds)
+            now.timeIntervalSince(session.createdAt) <= maxAge
+        }
+
+        guard !newSessions.isEmpty else { return }
+
+        // Capture current tab index
+        guard let tabIndex = GhosttyHelper.getSelectedTabIndex() else {
+            DebugLog.log("[SessionObserver] Bind-on-start: Could not get Ghostty tab index")
+            return
+        }
+
+        // Update the first new session with the tab index
+        // (Typically only one session starts at a time)
+        if let firstNew = newSessions.first {
+            DebugLog.log("[SessionObserver] Bind-on-start: Captured tab index \(tabIndex) for session \(firstNew.sessionId)")
+            updateSessionTabIndex(sessionId: firstNew.sessionId, tty: firstNew.tty, tabIndex: tabIndex, storeData: storeData)
+        }
+    }
+
+    private func updateSessionTabIndex(sessionId: String, tty: String?, tabIndex: Int, storeData: StoreData) {
+        var updatedData = storeData
+        let key = tty.map { "\(sessionId):\($0)" } ?? sessionId
+
+        guard var session = updatedData.sessions[key] else { return }
+        session.ghosttyTabIndex = tabIndex
+        updatedData.sessions[key] = session
+
+        // Write back to file
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(updatedData)
+            try jsonData.write(to: storeFile)
+            DebugLog.log("[SessionObserver] Bind-on-start: Updated session file with tab index \(tabIndex)")
+        } catch {
+            DebugLog.log("[SessionObserver] Bind-on-start: Failed to write tab index: \(error)")
         }
     }
 

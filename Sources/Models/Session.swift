@@ -7,6 +7,7 @@ struct Session: Codable, Identifiable {
     var status: SessionStatus
     let createdAt: Date
     var updatedAt: Date
+    var ghosttyTabIndex: Int?  // Bind-on-start: tab index at session start
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -27,5 +28,6 @@ struct Session: Codable, Identifiable {
         case status
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case ghosttyTabIndex = "ghostty_tab_index"
     }
 }
