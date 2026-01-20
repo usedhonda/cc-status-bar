@@ -199,6 +199,47 @@ Pipe JSON directly:
 echo '{"proto":"ccsb.v1",...}' | CCStatusBar emit --json
 ```
 
+## Security & Privacy
+
+### Data Collection
+
+CC Status Bar stores the following data **locally on your machine**:
+
+| Data | Location | Purpose |
+|------|----------|---------|
+| Session info | `~/Library/Application Support/CCStatusBar/sessions.json` | Track active Claude Code sessions |
+| Debug logs | `~/Library/Logs/CCStatusBar/debug.log` | Troubleshooting |
+
+**What we store:**
+- Project directory paths (for display only)
+- TTY identifiers (for terminal switching)
+- Session timestamps
+
+**What we DON'T store:**
+- Your code or file contents
+- Claude Code prompts or responses
+- Any personal information
+
+### Network Activity
+
+CC Status Bar makes **zero network requests**. All functionality is local.
+
+### Diagnostics Privacy
+
+When you click "Copy Diagnostics":
+- User paths are masked (`/Users/yourname/` → `~/`)
+- TTY names are shortened (`/dev/ttys001` → `ttys001`)
+- No settings.json content is included
+
+### Why These Permissions?
+
+| Permission | Reason |
+|------------|--------|
+| **Accessibility** | Required to identify and switch Ghostty tabs via Accessibility API |
+| **Automation** | Required to send AppleScript commands to iTerm2/Terminal.app |
+
+These permissions are only used when you click a session to focus its terminal.
+
 ## Troubleshooting
 
 ### Copy Diagnostics
