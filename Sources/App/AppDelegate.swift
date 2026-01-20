@@ -5,7 +5,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
-    private let animationManager = AnimationManager.shared
     private var isMenuOpen = false
 
     @MainActor
@@ -24,25 +23,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Setup animation callback - only rebuild menu when open (for running session spinners)
-        animationManager.onFrameUpdate = { [weak self] in
-            if self?.isMenuOpen == true {
-                self?.rebuildMenu()
-            }
-        }
-
         // Subscribe to session changes
         sessionObserver.$sessions
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.updateAnimationState()
                 self?.updateStatusTitle()
                 self?.rebuildMenu()
             }
             .store(in: &cancellables)
 
         // Set initial state
-        updateAnimationState()
         updateStatusTitle()
         rebuildMenu()
 
@@ -146,18 +136,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshUI() {
         updateStatusTitle()
         rebuildMenu()
-    }
-
-    /// Update animation state based on session counts
-    @MainActor
-    private func updateAnimationState() {
-        // Animate only when tools are actively running (PreToolUse..PostToolUse)
-        let needsAnimation = sessionObserver.toolRunningCount > 0
-        if needsAnimation && !animationManager.isAnimating {
-            animationManager.startAnimation()
-        } else if !needsAnimation && animationManager.isAnimating {
-            animationManager.stopAnimation()
-        }
     }
 
     // MARK: - Menu Building
@@ -387,10 +365,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        // Line 1: ● project-name (or spinner when tool is running)
+        // Set icon using NSMenuItem.image (auto-aligned by macOS)
+        let env = EnvironmentResolver.shared.resolve(session: session)
+        if let icon = IconManager.shared.icon(for: env, size: 48) {
+            item.image = icon
+        }
+
+        // Line 1: ● project-name (◉ when tool is running)
         let symbol: String
-        if session.isToolRunning == true && animationManager.isAnimating {
-            symbol = animationManager.currentSpinnerFrame  // Animated spinner for tool execution
+        if session.isToolRunning == true {
+            symbol = "◉"  // Tool running indicator
         } else {
             symbol = displayStatus.symbol  // Static symbol (●, ◐, ✓)
         }

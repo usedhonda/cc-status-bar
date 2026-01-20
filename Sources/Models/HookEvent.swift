@@ -18,6 +18,7 @@ struct HookEvent: Codable {
     let notificationType: String?
     let message: String?  // Notification message (used as fallback for permission detection)
     var termProgram: String?  // Captured from TERM_PROGRAM environment variable (legacy)
+    var actualTermProgram: String?  // Actual terminal when inside tmux (detected from client parent)
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain
     var editorPID: Int32?  // Editor process ID for direct activation
 
@@ -42,6 +43,7 @@ struct HookEvent: Codable {
         case notificationType = "notification_type"
         case message
         case termProgram = "term_program"
+        case actualTermProgram = "actual_term_program"
         case editorBundleID = "editor_bundle_id"
         case editorPID = "editor_pid"
     }

@@ -61,6 +61,96 @@ enum TmuxHelper {
         return runCommand(tmux, args)
     }
 
+    /// Detect the parent terminal application for a tmux session
+    /// - Parameter sessionName: The tmux session name (e.g., "chrome-ai-bridge")
+    /// - Returns: Terminal identifier (e.g., "ghostty", "iTerm.app") or nil
+    static func getClientTerminalInfo(for sessionName: String) -> String? {
+        let tmux = findTmux()
+
+        // Get all clients with their PID and session
+        let output = runCommand(tmux, ["list-clients", "-F", "#{client_pid}|#{client_session}"])
+
+        // Find the client attached to this session
+        var clientPid: pid_t?
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: "|").map(String.init)
+            if parts.count >= 2 && parts[1] == sessionName {
+                clientPid = pid_t(parts[0])
+                break
+            }
+        }
+
+        // If no client found for this session, try any client (tmux may share clients)
+        if clientPid == nil {
+            for line in output.split(separator: "\n") {
+                let parts = line.split(separator: "|").map(String.init)
+                if parts.count >= 1, let pid = pid_t(parts[0]) {
+                    clientPid = pid
+                    break
+                }
+            }
+        }
+
+        guard let pid = clientPid else {
+            DebugLog.log("[TmuxHelper] No client found for session '\(sessionName)'")
+            return nil
+        }
+
+        // Trace parent process chain to find terminal
+        let terminalInfo = traceParentToTerminal(pid: pid)
+        DebugLog.log("[TmuxHelper] Session '\(sessionName)' client PID \(pid) -> terminal: \(terminalInfo ?? "unknown")")
+        return terminalInfo
+    }
+
+    /// Trace parent process chain to find terminal application
+    private static func traceParentToTerminal(pid: pid_t) -> String? {
+        var currentPid = pid
+        var visited = Set<pid_t>()
+
+        while currentPid > 1 && !visited.contains(currentPid) {
+            visited.insert(currentPid)
+
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/ps")
+            process.arguments = ["-o", "ppid=,comm=", "-p", "\(currentPid)"]
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                break
+            }
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !output.isEmpty else {
+                break
+            }
+
+            let parts = output.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count >= 2 else { break }
+
+            let ppid = pid_t(parts[0].trimmingCharacters(in: .whitespaces)) ?? 0
+            let comm = parts[1].lowercased()
+
+            // Check for known terminal applications
+            if comm.contains("ghostty") {
+                return "ghostty"
+            } else if comm.contains("iterm") {
+                return "iTerm.app"
+            } else if comm.contains("terminal") && !comm.contains("iterm") {
+                return "Apple_Terminal"
+            }
+
+            currentPid = ppid
+        }
+
+        return nil
+    }
+
     private static func runCommand(_ executable: String, _ args: [String]) -> String {
         let process = Process()
         let pipe = Pipe()

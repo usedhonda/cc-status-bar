@@ -130,6 +130,10 @@ final class SessionStore {
             if existing.termProgram == nil, let termProgram = event.termProgram {
                 existing.termProgram = termProgram
             }
+            // Update actualTermProgram if provided (for tmux sessions)
+            if existing.actualTermProgram == nil, let actualTermProgram = event.actualTermProgram {
+                existing.actualTermProgram = actualTermProgram
+            }
             // Update editorBundleID if provided (first value wins)
             if existing.editorBundleID == nil, let bundleID = event.editorBundleID {
                 existing.editorBundleID = bundleID
@@ -163,6 +167,7 @@ final class SessionStore {
                 updatedAt: now,
                 ghosttyTabIndex: tabIndex,
                 termProgram: event.termProgram,
+                actualTermProgram: event.actualTermProgram,
                 editorBundleID: event.editorBundleID,
                 editorPID: event.editorPID,
                 waitingReason: waitingReason,
