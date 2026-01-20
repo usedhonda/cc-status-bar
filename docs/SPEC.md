@@ -46,9 +46,8 @@ This document defines the correct behavior of the app. Any modifications MUST pr
 
 ### 1.6 Implementation
 
-**File**: `Sources/App/AppDelegate.swift`
-**Method**: `updateStatusTitle()`
-**Lines**: 57-129
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `updateStatusTitle()`
 
 ---
 
@@ -91,12 +90,10 @@ This document defines the correct behavior of the app. Any modifications MUST pr
 
 ### 2.5 Implementation
 
-**File**: `Sources/App/AppDelegate.swift`
-**Method**: `createSessionMenuItem(_:)`
-**Lines**: 320-395
-
-**File**: `Sources/Models/SessionStatus.swift`
-**Properties**: `symbol`, `label`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createSessionMenuItem(_:)`
+- **File**: `Sources/Models/SessionStatus.swift`
+- **Properties**: `symbol`, `label`
 
 ---
 
@@ -120,17 +117,9 @@ When user focuses a terminal with a waiting session, mark it as "acknowledged" s
 
 ### 3.4 Implementation
 
-**File**: `Sources/Services/SessionObserver.swift`
-**Properties**:
-- `acknowledgedSessionIds: Set<String>` (line 14)
-- `unacknowledgedWaitingCount: Int` (lines 25-29)
-- `unacknowledgedRedCount: Int` (lines 31-38) - permission_prompt waiting sessions
-- `unacknowledgedYellowCount: Int` (lines 40-47) - stop/unknown waiting sessions
-- `displayedGreenCount: Int` (lines 49-55)
-**Methods**:
-- `acknowledge(sessionId:)` (lines 64-68)
-- `isAcknowledged(sessionId:)` (lines 71-73)
-- `cleanupAcknowledgedSessions(_:)` (lines 177-184)
+- **File**: `Sources/Services/SessionObserver.swift`
+- **Properties**: `acknowledgedSessionIds`, `unacknowledgedRedCount`, `unacknowledgedYellowCount`, `displayedGreenCount`
+- **Methods**: `acknowledge(sessionId:)`, `isAcknowledged(sessionId:)`
 
 ---
 
@@ -179,14 +168,12 @@ return value > 0 ? value : 60  // This breaks "Never"
 
 ### 4.6 Implementation
 
-**File**: `Sources/Services/AppSettings.swift`
-**Property**: `sessionTimeoutMinutes` (lines 26-35)
-
-**File**: `Sources/Models/StoreData.swift`
-**Property**: `activeSessions` (lines 17-28)
-
-**File**: `Sources/App/AppDelegate.swift`
-**Method**: `createTimeoutMenu()` (lines 230-263)
+- **File**: `Sources/Services/AppSettings.swift`
+- **Property**: `sessionTimeoutMinutes`
+- **File**: `Sources/Models/StoreData.swift`
+- **Property**: `activeSessions`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createTimeoutMenu()`
 
 ---
 
@@ -217,8 +204,8 @@ Settings >
 
 ### 5.2 Implementation
 
-**File**: `Sources/App/AppDelegate.swift`
-**Method**: `createSettingsMenu()` (lines 188-227)
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createSettingsMenu()`
 
 ---
 
@@ -239,6 +226,8 @@ Settings >
 | termProgram | String? | TERM_PROGRAM (legacy) |
 | editorBundleID | String? | Editor bundle ID |
 | editorPID | pid_t? | Editor process ID |
+| toolName | String? | External tool name (for CCSB events) |
+| toolVersion | String? | External tool version |
 
 ### 6.2 Computed Properties
 
@@ -251,11 +240,143 @@ Settings >
 
 ### 6.3 Implementation
 
-**File**: `Sources/Models/Session.swift`
+- **File**: `Sources/Models/Session.swift`
 
 ---
 
-## 7. File Paths
+## 7. CCSB Events Protocol
+
+### 7.1 Purpose
+
+Standardized protocol for external CLI tools to integrate with CC Status Bar.
+
+### 7.2 Event Types
+
+| Event | Description |
+|-------|-------------|
+| `session.start` | Session started |
+| `session.stop` | Session ended |
+| `session.waiting` | Waiting for user input |
+| `session.running` | Running/executing |
+| `artifact.link` | Link to artifact (file, URL, PR) |
+
+### 7.3 Attention Levels
+
+| Level | Color | Description |
+|-------|-------|-------------|
+| `green` | 🟢 | Running, no action needed |
+| `yellow` | 🟡 | Waiting for input |
+| `red` | 🔴 | Error or critical |
+| `none` | ⚪ | Stopped |
+
+### 7.4 JSON Format
+
+```json
+{
+  "proto": "ccsb.v1",
+  "event": "session.waiting",
+  "session_id": "unique-id",
+  "timestamp": "2026-01-19T12:00:00Z",
+  "tool": {
+    "name": "aider",
+    "version": "0.50.0"
+  },
+  "cwd": "/path/to/project",
+  "tty": "/dev/ttys001",
+  "attention": {
+    "level": "yellow",
+    "reason": "Waiting for user input"
+  },
+  "summary": "Waiting for input"
+}
+```
+
+### 7.5 Implementation
+
+- **File**: `Sources/Models/CCSBEvent.swift`
+- **File**: `Sources/CLI/EmitCommand.swift`
+- **File**: `Sources/Services/SessionStore.swift`
+- **Method**: `updateSession(ccsbEvent:)`
+
+---
+
+## 8. CLI Commands
+
+### 8.1 Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `CCStatusBar setup` | Configure hooks and symlink |
+| `CCStatusBar setup --force` | Force reconfigure |
+| `CCStatusBar setup --uninstall` | Remove hooks and data |
+| `CCStatusBar list` | List active sessions |
+| `CCStatusBar hook <event>` | Process hook event (internal) |
+| `CCStatusBar emit` | Emit CCSB protocol event |
+
+### 8.2 emit Command Options
+
+| Option | Description |
+|--------|-------------|
+| `--tool` | Tool name (required) |
+| `--tool-version` | Tool version |
+| `--event` | Event type (required) |
+| `--session-id` | Session ID (required) |
+| `--cwd` | Working directory |
+| `--tty` | TTY device path |
+| `--attention` | Attention level |
+| `--summary` | Human-readable summary |
+| `--json` | Read JSON from stdin |
+
+### 8.3 Implementation
+
+- **File**: `Sources/CLI/SetupCommand.swift`
+- **File**: `Sources/CLI/ListCommand.swift`
+- **File**: `Sources/CLI/HookCommand.swift`
+- **File**: `Sources/CLI/EmitCommand.swift`
+
+---
+
+## 9. Terminal Focus
+
+### 9.1 Supported Environments
+
+| Environment | Focus Method |
+|-------------|--------------|
+| Ghostty + tmux | Tab switch via Accessibility API + tmux select-pane |
+| Ghostty (no tmux) | Tab switch via Accessibility API |
+| iTerm2 | AppleScript with TTY search |
+| Terminal.app + tmux | tmux select-pane only |
+
+### 9.2 Environment Resolution
+
+`EnvironmentResolver` determines the focus environment for each session:
+
+1. Check for editor (VS Code, Cursor, etc.) by `editorBundleID`
+2. Check for Ghostty tab binding
+3. Check for iTerm2 via AppleScript
+4. Check for tmux session
+5. Fall back to unknown
+
+### 9.3 Icon Display
+
+`IconManager` provides application icons for session display:
+
+- Caches icons by bundle ID
+- Supports terminal icons (Ghostty, iTerm2, Terminal.app)
+- Supports editor icons (VS Code, Cursor, etc.)
+
+### 9.4 Implementation
+
+- **File**: `Sources/Services/EnvironmentResolver.swift`
+- **File**: `Sources/Services/FocusManager.swift`
+- **File**: `Sources/Services/IconManager.swift`
+- **File**: `Sources/Services/GhosttyHelper.swift`
+- **File**: `Sources/Services/ITerm2Helper.swift`
+- **File**: `Sources/Services/TmuxHelper.swift`
+
+---
+
+## 10. File Paths
 
 | Purpose | Path |
 |---------|------|
@@ -263,3 +384,21 @@ Settings >
 | Settings | UserDefaults (standard) |
 | Debug log | ~/Library/Logs/CCStatusBar/debug.log |
 | CLI symlink | ~/Library/Application Support/CCStatusBar/bin/CCStatusBar |
+
+---
+
+## 11. Diagnostics
+
+### 11.1 Privacy
+
+Diagnostics output masks sensitive information:
+
+- User paths: `/Users/username/` → `~/`
+- TTY: `/dev/ttys001` → `ttys001`
+- settings.json content is NOT included
+
+### 11.2 Implementation
+
+- **File**: `Sources/Services/DebugLog.swift`
+- **Method**: `collectDiagnostics()`
+- **Private methods**: `maskPath(_:)`, `maskTTY(_:)`

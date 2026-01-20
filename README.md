@@ -7,10 +7,10 @@ A native macOS menu bar app for real-time monitoring of Claude Code sessions.
 ## Features
 
 ### Menu Bar Display
-- **🟢 Green + Spinner** = Sessions running (animated)
+- **🟢 Green** = Sessions running
 - **🔴 Red** = Permission prompt waiting (highest priority)
 - **🟡 Yellow** = Command completion waiting
-- **⚪ White CC** = Idle (no active sessions)
+- **⚪ White** = Idle (no active sessions)
 
 ### Session List
 Click the menu to see session details:
