@@ -15,6 +15,7 @@ struct Session: Codable, Identifiable {
     var updatedAt: Date
     var ghosttyTabIndex: Int?  // Bind-on-start: tab index at session start
     var termProgram: String?   // TERM_PROGRAM environment variable (legacy, kept for compatibility)
+    var actualTermProgram: String?  // Actual terminal when inside tmux (detected from client parent)
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain (e.g., "com.todesktop.230313mzl4w4u92" for Cursor)
     var editorPID: pid_t?  // Editor process ID for direct activation (reliable for multiple instances)
     var waitingReason: WaitingReason?  // Reason for waitingInput status (permissionPrompt=red, stop/unknown=yellow)
@@ -48,6 +49,7 @@ struct Session: Codable, Identifiable {
         case updatedAt = "updated_at"
         case ghosttyTabIndex = "ghostty_tab_index"
         case termProgram = "term_program"
+        case actualTermProgram = "actual_term_program"
         case editorBundleID = "editor_bundle_id"
         case editorPID = "editor_pid"
         case waitingReason = "waiting_reason"

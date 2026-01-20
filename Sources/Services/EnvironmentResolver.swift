@@ -76,7 +76,32 @@ final class EnvironmentResolver {
             )
         }
 
-        // Priority 2: TERM_PROGRAM detection
+        // Priority 2: actualTermProgram (detected from tmux client's parent process)
+        // Note: Real-time detection moved to FocusManager for performance
+        if let actualProg = session.actualTermProgram?.lowercased() {
+            switch actualProg {
+            case "ghostty":
+                return .ghostty(
+                    hasTmux: hasTmux,
+                    tabIndex: session.ghosttyTabIndex,
+                    tmuxSessionName: tmuxSessionName
+                )
+            case "iterm.app":
+                return .iterm2(
+                    hasTmux: hasTmux,
+                    tmuxSessionName: tmuxSessionName
+                )
+            case "apple_terminal":
+                return .terminal(
+                    hasTmux: hasTmux,
+                    tmuxSessionName: tmuxSessionName
+                )
+            default:
+                break
+            }
+        }
+
+        // Priority 3: TERM_PROGRAM detection (for non-tmux sessions)
         if let prog = session.termProgram?.lowercased() {
             switch prog {
             case "ghostty":
@@ -109,7 +134,7 @@ final class EnvironmentResolver {
             }
         }
 
-        // Priority 3: Detect terminal by running state (with tmux)
+        // Priority 4: Detect terminal by running state (with tmux)
         if hasTmux {
             // Check if Ghostty has a tab with this tmux session name
             if GhosttyHelper.isRunning,
@@ -125,7 +150,7 @@ final class EnvironmentResolver {
             return .tmuxOnly(sessionName: tmuxSessionName ?? "unknown")
         }
 
-        // Priority 4: Non-tmux detection
+        // Priority 5: Non-tmux detection
         if session.ghosttyTabIndex != nil || GhosttyHelper.isRunning {
             return .ghostty(
                 hasTmux: false,

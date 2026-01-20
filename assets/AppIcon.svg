@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Background with rounded corners (macOS style) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="180" ry="180" fill="#1a1a1a"/>
+
+  <!-- Subtle gradient overlay -->
+  <defs>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.05"/>
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:0.2"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="180" ry="180" fill="url(#shine)"/>
+
+  <!-- Orange circle outline -->
+  <circle cx="512" cy="460" r="280" fill="none" stroke="#D97757" stroke-width="8" opacity="0.9"/>
+
+  <!-- Cc Text (serif style) -->
+  <text x="512" y="520"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="380"
+        font-weight="400"
+        fill="#F5F5F0"
+        text-anchor="middle"
+        letter-spacing="-10">Cc</text>
+
+  <!-- Three status dots at bottom -->
+  <circle cx="432" cy="820" r="24" fill="#4ADE80"/>
+  <circle cx="512" cy="820" r="24" fill="#FACC15"/>
+  <circle cx="592" cy="820" r="24" fill="#F87171"/>
+</svg>

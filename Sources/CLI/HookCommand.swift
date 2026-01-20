@@ -31,6 +31,13 @@ struct HookCommand: ParsableCommand {
             event.termProgram = ProcessInfo.processInfo.environment["TERM_PROGRAM"]
         }
 
+        // If inside tmux, detect the actual terminal from tmux client's parent process
+        if event.termProgram?.lowercased() == "tmux",
+           let tty = event.tty,
+           let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            event.actualTermProgram = TmuxHelper.getClientTerminalInfo(for: paneInfo.session)
+        }
+
         // Detect editor via PPID chain (most accurate for VS Code forks)
         if event.editorBundleID == nil {
             if let editor = EditorDetector.shared.detectFromCurrentProcess() {

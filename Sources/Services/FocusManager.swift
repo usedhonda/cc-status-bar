@@ -15,7 +15,25 @@ final class FocusManager {
     /// - Returns: FocusResult indicating success or failure
     @discardableResult
     func focus(session: Session) -> FocusResult {
-        let env = EnvironmentResolver.shared.resolve(session: session)
+        var env = EnvironmentResolver.shared.resolve(session: session)
+
+        // Real-time detection for tmux sessions without actualTermProgram
+        if session.actualTermProgram == nil, env.hasTmux, let tmuxName = env.tmuxSessionName {
+            if let detected = TmuxHelper.getClientTerminalInfo(for: tmuxName)?.lowercased() {
+                DebugLog.log("[FocusManager] Real-time detected terminal: \(detected)")
+                switch detected {
+                case "ghostty":
+                    env = .ghostty(hasTmux: true, tabIndex: session.ghosttyTabIndex, tmuxSessionName: tmuxName)
+                case "iterm.app":
+                    env = .iterm2(hasTmux: true, tmuxSessionName: tmuxName)
+                case "apple_terminal":
+                    env = .terminal(hasTmux: true, tmuxSessionName: tmuxName)
+                default:
+                    break
+                }
+            }
+        }
+
         DebugLog.log("[FocusManager] Focusing '\(session.projectName)' (env: \(env.displayName))")
 
         switch env {
