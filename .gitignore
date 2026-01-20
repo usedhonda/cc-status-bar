@@ -30,6 +30,9 @@ docs/log/
 
 # Plans
 plans/
+
+# Local (credentials, release docs)
+.local/
 CCStatusBar.dmg
 CCStatusBar.app/Contents/CodeResources
 CCStatusBar.app/Contents/_CodeSignature/

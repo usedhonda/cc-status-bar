@@ -122,3 +122,42 @@ if waitingCount > 0 {
 - Sessions: `~/Library/Application Support/CCStatusBar/sessions.json`
 - Settings: `~/.claude/settings.json`
 - Logs: `~/Library/Logs/CCStatusBar/debug.log`
+
+## Release
+
+Release procedure is documented in `.local/release.md` (local only, not committed).
+
+**Important**: When icons or screenshots are updated, a new release must be created.
+
+## Document Sync
+
+- README.md: User-facing feature descriptions (only implemented features)
+- SPEC.md: Implementation specifications (no line numbers, reference by method name)
+- Update both when adding/removing/changing features
+
+## Git Commit
+
+### Pre-commit Check (Required)
+
+When committing feature additions, changes, or deletions, verify the following:
+
+1. **README.md verification**
+   - Added features are documented
+   - Removed features are removed from docs
+   - Documentation matches implementation
+
+2. **SPEC.md verification**
+   - New specifications are added
+   - Changed specifications are updated
+   - Removed specifications are deleted
+
+3. **Screenshot/Asset verification**
+   - Screenshots updated for UI changes
+   - Asset filenames changed when updated (cache busting)
+
+### Document Update Required Before Commit
+
+- New feature → README + SPEC
+- UI change → Screenshot + README
+- Spec change → SPEC
+- Feature removal → Remove from README + SPEC
