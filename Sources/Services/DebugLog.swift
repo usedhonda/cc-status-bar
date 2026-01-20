@@ -46,6 +46,20 @@ enum DebugLog {
 
     // MARK: - Diagnostics
 
+    /// Mask user-specific paths for privacy
+    private static func maskPath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.replacingOccurrences(of: home, with: "~")
+    }
+
+    /// Mask TTY to show only device name (e.g., /dev/ttys001 -> ttys001)
+    private static func maskTTY(_ tty: String) -> String {
+        if tty.hasPrefix("/dev/") {
+            return String(tty.dropFirst(5))
+        }
+        return tty
+    }
+
     static func collectDiagnostics() -> String {
         var info: [String] = []
         let fm = FileManager.default
@@ -56,7 +70,7 @@ enum DebugLog {
 
         // App info
         info.append("-- App Info --")
-        info.append("Bundle Path: \(Bundle.main.bundlePath)")
+        info.append("Bundle Path: \(maskPath(Bundle.main.bundlePath))")
         info.append("Is Translocated: \(SetupManager.shared.isAppTranslocated())")
         info.append("Is First Run: \(SetupManager.shared.isFirstRun())")
         info.append("")
@@ -64,10 +78,10 @@ enum DebugLog {
         // Symlink info
         info.append("-- Symlink --")
         let symlinkPath = SetupManager.symlinkURL.path
-        info.append("Symlink Path: \(symlinkPath)")
+        info.append("Symlink Path: \(maskPath(symlinkPath))")
         if fm.fileExists(atPath: symlinkPath) {
             if let target = try? fm.destinationOfSymbolicLink(atPath: symlinkPath) {
-                info.append("Symlink Target: \(target)")
+                info.append("Symlink Target: \(maskPath(target))")
                 info.append("Target Exists: \(fm.fileExists(atPath: target))")
             } else {
                 info.append("Symlink Target: (not a symlink)")
@@ -80,7 +94,7 @@ enum DebugLog {
         // Sessions file
         info.append("-- Sessions --")
         let sessionsPath = SetupManager.sessionsFile.path
-        info.append("Sessions File: \(sessionsPath)")
+        info.append("Sessions File: \(maskPath(sessionsPath))")
         info.append("Sessions File Exists: \(fm.fileExists(atPath: sessionsPath))")
         info.append("")
 
@@ -88,10 +102,10 @@ enum DebugLog {
         info.append("-- Settings --")
         let settingsPath = fm.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/settings.json").path
-        info.append("Settings File: \(settingsPath)")
+        info.append("Settings File: \(maskPath(settingsPath))")
         info.append("Settings File Exists: \(fm.fileExists(atPath: settingsPath))")
 
-        // Check for hooks
+        // Check for hooks (only report presence, not content)
         if fm.fileExists(atPath: settingsPath),
            let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -114,7 +128,7 @@ enum DebugLog {
         // Log file
         info.append("-- Log File --")
         if let logURL = logFileURL() {
-            info.append("Log File: \(logURL.path)")
+            info.append("Log File: \(maskPath(logURL.path))")
             info.append("Log File Exists: \(fm.fileExists(atPath: logURL.path))")
         }
 
