@@ -6,12 +6,6 @@ final class SessionStore {
     private let storeDir: URL
     private let storeFile: URL
 
-    private var timeout: TimeInterval {
-        let minutes = AppSettings.sessionTimeoutMinutes
-        // 0 means never timeout
-        return minutes > 0 ? TimeInterval(minutes * 60) : .infinity
-    }
-
     private init() {
         storeDir = SetupManager.appSupportDir
         storeFile = SetupManager.sessionsFile
@@ -73,11 +67,6 @@ final class SessionStore {
 
         data.sessions[key] = session
         data.updatedAt = Date()
-
-        // Clean up timed out sessions
-        data.sessions = data.sessions.filter { (_, v) in
-            Date().timeIntervalSince(v.updatedAt) <= timeout
-        }
 
         saveData(data)
 
@@ -178,15 +167,11 @@ final class SessionStore {
         data.sessions[key] = session
         data.updatedAt = now
 
-        // Clean up timed out sessions
-        data.sessions = data.sessions.filter { (_, v) in
-            Date().timeIntervalSince(v.updatedAt) <= timeout
-        }
-
         saveData(data)
 
         // Note: Notifications are sent from SessionObserver (GUI) to respect user settings
         // CLI process cannot reliably read UserDefaults set by GUI
+        // Timeout cleanup is also handled by GUI (SessionObserver) for the same reason
 
         return session
     }
