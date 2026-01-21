@@ -7,6 +7,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var isMenuOpen = false
 
+    /// Debounce work item for menu rebuilds
+    private var menuRebuildWorkItem: DispatchWorkItem?
+
+    /// Static DateFormatter for session time display (avoid repeated allocations)
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Exit if another instance is already running (first one wins)
@@ -29,12 +39,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Subscribe to session changes
+        // Subscribe to session changes (debounced menu rebuild)
         sessionObserver.$sessions
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateStatusTitle()
-                self?.rebuildMenu()
+                self?.scheduleMenuRebuild()
             }
             .store(in: &cancellables)
 
@@ -599,9 +609,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: date)
+        return Self.timeFormatter.string(from: date)
+    }
+
+    /// Schedule a debounced menu rebuild (100ms delay)
+    @MainActor
+    private func scheduleMenuRebuild() {
+        menuRebuildWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.rebuildMenu()
+        }
+        menuRebuildWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
     }
 
     @objc private func sessionItemClicked(_ sender: NSMenuItem) {

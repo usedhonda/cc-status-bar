@@ -7,6 +7,18 @@ import ApplicationServices
 enum GhosttyHelper {
     static let bundleIdentifier = "com.mitchellh.ghostty"
 
+    // MARK: - Tab Titles Cache
+
+    /// Cache for tab titles (TTL: 2 seconds)
+    private static var tabTitlesCache: (titles: [String], timestamp: Date)?
+    private static let tabTitlesCacheTTL: TimeInterval = 2.0
+
+    /// Invalidate tab titles cache
+    static func invalidateTabTitlesCache() {
+        tabTitlesCache = nil
+        DebugLog.log("[GhosttyHelper] Tab titles cache invalidated")
+    }
+
     /// Check if Ghostty is running
     static var isRunning: Bool {
         !NSRunningApplication.runningApplications(
@@ -512,8 +524,25 @@ enum GhosttyHelper {
         return getAllTabTitles().contains { $0.contains(token) }
     }
 
-    /// Get all tab titles for debugging
+    /// Get all tab titles (with caching)
     static func getAllTabTitles() -> [String] {
+        let now = Date()
+
+        // Check cache
+        if let cached = tabTitlesCache,
+           now.timeIntervalSince(cached.timestamp) < tabTitlesCacheTTL {
+            DebugLog.log("[GhosttyHelper] Tab titles cache hit")
+            return cached.titles
+        }
+
+        // Cache miss - fetch from Accessibility API
+        let titles = fetchAllTabTitles()
+        tabTitlesCache = (titles, now)
+        return titles
+    }
+
+    /// Fetch all tab titles directly from Accessibility API (no cache)
+    private static func fetchAllTabTitles() -> [String] {
         guard let pid = ghosttyPid else { return [] }
 
         let appElement = AXUIElementCreateApplication(pid)
