@@ -12,6 +12,7 @@ final class SessionObserver: ObservableObject {
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
     private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
     private var acknowledgedSessionIds: Set<String> = []  // Sessions user has seen (for yellow->green)
+    private var isInitialLoad = true  // Skip notifications on first load to avoid spam at startup
 
     var runningCount: Int {
         sessions.filter { $0.status == .running }.count
@@ -132,26 +133,37 @@ final class SessionObserver: ObservableObject {
             let storeData = try decoder.decode(StoreData.self, from: data)
             var loadedSessions = storeData.activeSessions
 
-            // Filter out sessions with invalid TTYs (e.g., after Mac restart)
-            let validSessions = loadedSessions.filter { session in
-                guard let tty = session.tty, !tty.isEmpty else { return true }
-                return FileManager.default.fileExists(atPath: tty)
+            // Check for sessions with invalid (stale) TTYs and mark them as stopped
+            var sessionsToMarkStopped: [Session] = []
+            for session in loadedSessions {
+                guard let tty = session.tty, !tty.isEmpty else { continue }
+                // Only mark running/waiting sessions with invalid TTY
+                if session.status != .stopped && !FileManager.default.fileExists(atPath: tty) {
+                    sessionsToMarkStopped.append(session)
+                }
             }
 
-            // Clean up invalid sessions from persistent store if any were removed
-            if validSessions.count < loadedSessions.count {
-                let invalidCount = loadedSessions.count - validSessions.count
-                DebugLog.log("[SessionObserver] Removed \(invalidCount) session(s) with invalid TTY")
-                cleanupInvalidSessions(validIds: Set(validSessions.map { $0.id }))
+            // Mark stale sessions as stopped (don't delete - let timeout handle removal)
+            if !sessionsToMarkStopped.isEmpty {
+                DebugLog.log("[SessionObserver] Marking \(sessionsToMarkStopped.count) session(s) as stopped (stale TTY)")
+                for session in sessionsToMarkStopped {
+                    SessionStore.shared.markSessionAsStopped(sessionId: session.sessionId, tty: session.tty)
+                }
+                // Reload to get updated data
+                let data = try Data(contentsOf: storeFile)
+                let storeData = try decoder.decode(StoreData.self, from: data)
+                loadedSessions = storeData.activeSessions
             }
-
-            loadedSessions = validSessions
 
             // Bind-on-start: Detect new sessions and capture Ghostty tab index
             captureGhosttyTabIndexForNewSessions(loadedSessions, storeData: storeData)
 
             // Send notifications for sessions that changed to waitingInput
-            sendNotificationsForWaitingSessions(loadedSessions)
+            // Skip on initial load to avoid notification spam at startup
+            if !isInitialLoad {
+                sendNotificationsForWaitingSessions(loadedSessions)
+            }
+            isInitialLoad = false
 
             // Clear acknowledged flag for sessions that returned to running
             cleanupAcknowledgedSessions(loadedSessions)
@@ -179,13 +191,18 @@ final class SessionObserver: ObservableObject {
         }
     }
 
-    /// Clear acknowledged flag when sessions return to running
+    /// Clear acknowledged flag and notification cooldown when sessions return to running
     private func cleanupAcknowledgedSessions(_ loadedSessions: [Session]) {
         let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
         let cleared = acknowledgedSessionIds.intersection(runningIds)
         if !cleared.isEmpty {
             acknowledgedSessionIds.subtract(runningIds)
             DebugLog.log("[SessionObserver] Cleared acknowledged for running sessions: \(cleared)")
+        }
+
+        // Clear notification cooldowns for sessions that returned to running
+        for sessionId in runningIds {
+            NotificationManager.shared.clearCooldown(sessionId: sessionId)
         }
     }
 

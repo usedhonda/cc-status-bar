@@ -49,4 +49,27 @@ enum TtyHelper {
         let shortTty = tty.replacingOccurrences(of: "/dev/", with: "")
         return "[CC] \(project) • \(shortTty)"
     }
+
+    /// Generate CCSB token for reliable tab identification
+    /// Format: "[CCSB:ttysNNN]"
+    /// This token is unique per TTY and used for direct tab lookup
+    /// - Parameter tty: TTY device path (e.g., "/dev/ttys023")
+    /// - Returns: Token string for tab matching
+    static func ccsbToken(tty: String) -> String {
+        let shortTty = tty.replacingOccurrences(of: "/dev/", with: "")
+        return "[CCSB:\(shortTty)]"
+    }
+
+    /// Extract TTY identifier from CCSB token
+    /// - Parameter token: Token string (e.g., "[CCSB:ttys023]")
+    /// - Returns: Short TTY identifier (e.g., "ttys023") or nil if invalid
+    static func extractTtyFromToken(_ token: String) -> String? {
+        let pattern = "\\[CCSB:(ttys\\d+)\\]"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: token, range: NSRange(token.startIndex..., in: token)),
+              let range = Range(match.range(at: 1), in: token) else {
+            return nil
+        }
+        return String(token[range])
+    }
 }

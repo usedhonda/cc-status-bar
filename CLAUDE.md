@@ -1,5 +1,23 @@
 # CC Status Bar Development Guide
 
+## 作業開始チェックリスト（最初に必ず確認）
+
+### タスク別必読ファイル
+
+| タスク | 必読ファイル |
+|--------|-------------|
+| リリース作業 | `.local/release.md` |
+| 機能追加 | `docs/SPEC.md`, `README.md` |
+| バグ修正 | `~/Library/Logs/CCStatusBar/debug.log` |
+| 設計判断 | `docs/ask/` (過去のAI議論) |
+
+### 外部API使用時
+
+- **必ずContext7でドキュメント取得**
+- 例: Apple Notarization, GitHub API, etc.
+
+---
+
 ## Language Policy
 
 **Development conversation**: Japanese (with Claude)

@@ -9,11 +9,41 @@ extension NSNotification.Name {
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
+    // Notification action identifiers
+    private static let focusActionIdentifier = "FOCUS_TERMINAL"
+    private static let categoryIdentifier = "SESSION_WAITING"
+
+    // Cooldown tracking: sessionId -> (lastStatus, lastNotificationTime)
+    private var notificationCooldowns: [String: (SessionStatus, Date)] = [:]
+    private let cooldownInterval: TimeInterval = 5 * 60  // 5 minutes
+
     override init() {
         super.init()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        setupNotificationActions()
         DebugLog.log("[NotificationManager] Initialized with delegate")
+    }
+
+    private func setupNotificationActions() {
+        // Create "Focus Terminal" action
+        let focusAction = UNNotificationAction(
+            identifier: Self.focusActionIdentifier,
+            title: "Focus Terminal",
+            options: [.foreground]
+        )
+
+        // Create category with the action
+        let category = UNNotificationCategory(
+            identifier: Self.categoryIdentifier,
+            actions: [focusAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        // Register the category
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+        DebugLog.log("[NotificationManager] Registered notification category with Focus action")
     }
 
     func requestPermission() {
@@ -60,12 +90,22 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func notifyWaitingInput(session: Session) {
         guard AppSettings.notificationsEnabled else { return }
 
+        // Check cooldown
+        if let (lastStatus, lastTime) = notificationCooldowns[session.id] {
+            let elapsed = Date().timeIntervalSince(lastTime)
+            if lastStatus == session.status && elapsed < cooldownInterval {
+                DebugLog.log("[NotificationManager] Cooldown active for \(session.projectName), skipping notification")
+                return
+            }
+        }
+
         DebugLog.log("[NotificationManager] Sending: \(session.projectName) - Waiting for input")
 
         let content = UNMutableNotificationContent()
         content.title = session.projectName
         content.body = "Waiting for input • \(session.environmentLabel)"
         content.sound = .default
+        content.categoryIdentifier = Self.categoryIdentifier  // Enable quick actions
 
         // Store full session info for click callback
         content.userInfo = [
@@ -81,11 +121,24 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             trigger: nil
         )
 
-        UNUserNotificationCenter.current().add(request) { error in
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
             if let error = error {
                 DebugLog.log("[NotificationManager] UNUserNotification failed: \(error.localizedDescription)")
+            } else {
+                // Update cooldown on successful send
+                self?.notificationCooldowns[session.id] = (session.status, Date())
             }
         }
+    }
+
+    /// Clear cooldown for a session (called when status changes to running)
+    func clearCooldown(sessionId: String) {
+        notificationCooldowns.removeValue(forKey: sessionId)
+    }
+
+    /// Clear all cooldowns (for testing/debugging)
+    func clearAllCooldowns() {
+        notificationCooldowns.removeAll()
     }
 
     func notifySessionTimeout(projectName: String) {
@@ -108,14 +161,26 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    // Handle notification click
+    // Handle notification click and action buttons
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        DebugLog.log("[NotificationManager] Notification clicked: \(userInfo)")
+        let actionIdentifier = response.actionIdentifier
+
+        DebugLog.log("[NotificationManager] Notification response: action=\(actionIdentifier)")
+
+        // Handle both notification click and Focus action button
+        let shouldFocus = actionIdentifier == UNNotificationDefaultActionIdentifier ||
+                          actionIdentifier == Self.focusActionIdentifier
+
+        guard shouldFocus else {
+            DebugLog.log("[NotificationManager] Action not handled: \(actionIdentifier)")
+            completionHandler()
+            return
+        }
 
         // Extract session key from userInfo
         guard let sessionId = userInfo["sessionId"] as? String else {

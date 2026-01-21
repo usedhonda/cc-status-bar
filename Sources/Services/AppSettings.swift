@@ -14,9 +14,9 @@ enum AppSettings {
 
     static var notificationsEnabled: Bool {
         get {
-            // Default to true if not set
+            // Default to false if not set (opt-in)
             if UserDefaults.standard.object(forKey: Keys.notificationsEnabled) == nil {
-                return true
+                return false
             }
             return UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
         }
