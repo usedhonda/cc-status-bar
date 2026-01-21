@@ -190,7 +190,12 @@ Settings >
 │   ├── 3 hours
 │   ├── 6 hours
 │   └── Never
+├── Global Hotkey (toggle) ← shows ⌘⇧C when enabled
 ├── ─────────────
+├── Permissions >
+│   ├── ✓/✗ Accessibility status
+│   ├── ─────────────
+│   └── Open Accessibility Settings...
 └── Reconfigure Hooks...
 ```
 
@@ -201,6 +206,7 @@ Settings >
 | Launch at Login | false |
 | Notifications | false |
 | Session Timeout | 60 minutes |
+| Global Hotkey | false |
 
 ### 5.2 Implementation
 
