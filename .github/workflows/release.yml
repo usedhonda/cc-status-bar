@@ -52,6 +52,7 @@ jobs:
 
       - name: Copy binary to app bundle
         run: |
+          mkdir -p CCStatusBar.app/Contents/MacOS
           cp .build/release/CCStatusBar CCStatusBar.app/Contents/MacOS/
           cp Resources/Info.plist CCStatusBar.app/Contents/Info.plist
 
