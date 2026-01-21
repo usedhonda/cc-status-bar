@@ -134,21 +134,6 @@ enum TmuxHelper {
         return runCommand(tmuxPath, args)
     }
 
-    /// Kill a tmux session by name
-    /// - Parameter sessionName: The name of the tmux session to kill
-    /// - Returns: true if successful
-    @discardableResult
-    static func killSession(_ sessionName: String) -> Bool {
-        let result = runCommand(tmuxPath, ["kill-session", "-t", sessionName])
-        if result.isEmpty || !result.contains("error") {
-            DebugLog.log("[TmuxHelper] Killed tmux session '\(sessionName)'")
-            invalidateAllCaches()
-            return true
-        }
-        DebugLog.log("[TmuxHelper] Failed to kill tmux session '\(sessionName)'")
-        return false
-    }
-
     /// Send keys to a tmux pane
     /// - Parameters:
     ///   - paneInfo: Target pane information
