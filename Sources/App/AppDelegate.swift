@@ -51,6 +51,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: .acknowledgeSession,
             object: nil
         )
+
+        // Watch for notification click to focus session (uses same code path as menu click)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFocusSession(_:)),
+            name: .focusSession,
+            object: nil
+        )
     }
 
     // MARK: - Status Title
@@ -430,6 +438,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func sessionItemClicked(_ sender: NSMenuItem) {
         guard let session = sender.representedObject as? Session else { return }
         focusTerminal(for: session)
+        Task { @MainActor in
+            sessionObserver.acknowledge(sessionId: session.id)
+            refreshUI()
+        }
     }
 
     // MARK: - Terminal Focus
@@ -512,6 +524,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessionObserver.acknowledge(sessionId: sessionId)
             refreshUI()
             DebugLog.log("[AppDelegate] Acknowledged session via notification click: \(sessionId)")
+        }
+    }
+
+    @objc private func handleFocusSession(_ notification: Notification) {
+        guard let sessionId = notification.userInfo?["sessionId"] as? String else { return }
+
+        Task { @MainActor in
+            // Find session from observer (same source as menu items)
+            guard let session = sessionObserver.sessions.first(where: { $0.id == sessionId }) else {
+                DebugLog.log("[AppDelegate] Session not found for focus: \(sessionId)")
+                return
+            }
+
+            // Use the same code path as menu click
+            focusTerminal(for: session)
+            sessionObserver.acknowledge(sessionId: sessionId)
+            refreshUI()
+            DebugLog.log("[AppDelegate] Focused session via notification click: \(session.projectName)")
         }
     }
 }

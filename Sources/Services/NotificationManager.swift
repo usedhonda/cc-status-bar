@@ -3,6 +3,7 @@ import Foundation
 
 extension NSNotification.Name {
     static let acknowledgeSession = NSNotification.Name("acknowledgeSession")
+    static let focusSession = NSNotification.Name("focusSession")
 }
 
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
@@ -116,40 +117,28 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         DebugLog.log("[NotificationManager] Notification clicked: \(userInfo)")
 
-        // Reconstruct session from userInfo
-        guard let sessionId = userInfo["sessionId"] as? String,
-              let cwd = userInfo["cwd"] as? String else {
-            DebugLog.log("[NotificationManager] Missing session info in notification")
+        // Extract session key from userInfo
+        guard let sessionId = userInfo["sessionId"] as? String else {
+            DebugLog.log("[NotificationManager] Missing sessionId in notification")
             completionHandler()
             return
         }
 
         let ttyString = userInfo["tty"] as? String
         let tty = (ttyString?.isEmpty == false) ? ttyString : nil
-        let tabIndex = userInfo["ghosttyTabIndex"] as? Int
-        let ghosttyTabIndex = (tabIndex == -1) ? nil : tabIndex
 
-        // Create session for focus
-        let session = Session(
-            sessionId: sessionId,
-            cwd: cwd,
-            tty: tty,
-            status: .waitingInput,
-            createdAt: Date(),
-            updatedAt: Date(),
-            ghosttyTabIndex: ghosttyTabIndex
-        )
+        // Build session key (same format as Session.id)
+        let sessionKey = tty.map { "\(sessionId):\($0)" } ?? sessionId
 
-        DebugLog.log("[NotificationManager] Focusing session: \(session.projectName)")
+        DebugLog.log("[NotificationManager] Delegating focus to AppDelegate for session: \(sessionKey)")
 
+        // Delegate to AppDelegate to use the same code path as menu click
         DispatchQueue.main.async {
-            // Post notification to acknowledge the session
             NotificationCenter.default.post(
-                name: .acknowledgeSession,
+                name: .focusSession,
                 object: nil,
-                userInfo: ["sessionId": session.id]
+                userInfo: ["sessionId": sessionKey]
             )
-            FocusManager.shared.focus(session: session)
         }
 
         completionHandler()
