@@ -38,8 +38,10 @@ final class GhosttyController: TerminalController {
             DebugLog.log("[GhosttyController] Selected tmux pane")
         }
 
-        // 2. Try Bind-on-start tab index first
-        if let tabIndex = tabIndex {
+        // 2. Try Bind-on-start tab index (only for tmux sessions)
+        // Non-tmux sessions use CCSB token search which is more reliable
+        // because Bind-on-start can capture wrong tab index if user switches tabs quickly
+        if hasTmux, let tabIndex = tabIndex {
             if GhosttyHelper.focusTabByIndex(tabIndex) {
                 DebugLog.log("[GhosttyController] Focused tab by index \(tabIndex)")
                 return .success
