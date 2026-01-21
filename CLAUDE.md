@@ -73,6 +73,16 @@ open CCStatusBar.app
 
 **Note**: Use self-signed certificate "CCStatusBar Dev" to preserve Accessibility permissions across rebuilds.
 
+### Post-Build Checklist (MANDATORY)
+
+TodoWriteでは以下を**別項目**として管理すること：
+
+1. `swift build` - ビルド
+2. `pkill + cp + codesign + open` - 再起動
+3. `tail ~/Library/Logs/CCStatusBar/debug.log` - ログ確認
+
+**ビルド成功で終わりにしない。再起動してログ確認するまでが実装。**
+
 ## Data Source
 
 Monitors `~/Library/Application Support/CCStatusBar/sessions.json`

@@ -154,10 +154,25 @@ final class SessionObserver: ObservableObject {
             // Check for sessions with invalid (stale) TTYs and mark them as stopped
             var sessionsToMarkStopped: [Session] = []
             for session in loadedSessions {
-                guard let tty = session.tty, !tty.isEmpty else { continue }
-                // Only mark running/waiting sessions with invalid TTY
-                if session.status != .stopped && !FileManager.default.fileExists(atPath: tty) {
-                    sessionsToMarkStopped.append(session)
+                // Skip already stopped sessions
+                guard session.status != .stopped else { continue }
+
+                // Case 1: TTY-based stale detection (terminals)
+                if let tty = session.tty, !tty.isEmpty {
+                    if !FileManager.default.fileExists(atPath: tty) {
+                        sessionsToMarkStopped.append(session)
+                    }
+                    continue
+                }
+
+                // Case 2: Editor PID-based stale detection (VSCode/Cursor without TTY)
+                // Only applies when: no TTY AND editorBundleID is set AND editorPID is set
+                if session.editorBundleID != nil,
+                   let editorPID = session.editorPID, editorPID > 0 {
+                    if !isEditorAlive(pid: editorPID, expectedBundleID: session.editorBundleID) {
+                        sessionsToMarkStopped.append(session)
+                        DebugLog.log("[SessionObserver] Editor process \(editorPID) not running for session \(session.projectName)")
+                    }
                 }
             }
 
@@ -295,6 +310,23 @@ final class SessionObserver: ObservableObject {
             guard let bundleId = app.bundleIdentifier else { return false }
             return otherTerminals.contains(bundleId)
         }
+    }
+
+    /// Check if an editor process is still alive (for VSCode/Cursor stale detection)
+    /// Uses bundleID matching to prevent false positives from PID reuse
+    private func isEditorAlive(pid: pid_t, expectedBundleID: String?) -> Bool {
+        // 1) Quick existence check using kill(pid, 0)
+        if kill(pid, 0) != 0 && errno != EPERM { return false }
+
+        // 2) PID reuse protection: verify bundleID matches
+        if let expectedBundleID = expectedBundleID,
+           let app = NSRunningApplication(processIdentifier: pid),
+           let bid = app.bundleIdentifier {
+            return bid == expectedBundleID && !app.isTerminated
+        }
+
+        // 3) If bundleID can't be retrieved, assume alive (safe fallback)
+        return true
     }
 
     /// Remove sessions with invalid TTYs from the persistent store

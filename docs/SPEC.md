@@ -75,10 +75,14 @@ This document defines the correct behavior of the app. Any modifications MUST pr
 | Status | WaitingReason | Symbol | Color |
 |--------|---------------|--------|-------|
 | running | - | ● | systemGreen |
+| running (tmux detached) | - | ● | systemGray |
 | waitingInput (unacknowledged) | permissionPrompt | ◐ | systemRed |
 | waitingInput (unacknowledged) | stop/unknown/nil | ◐ | systemYellow |
+| waitingInput (tmux detached) | - | ◐ | systemGray |
 | waitingInput (acknowledged) | - | ● | systemGreen |
 | stopped | - | ✓ | systemGray |
+
+**Note**: Detached tmux sessions (where the terminal tab is closed but tmux session persists) are shown in gray regardless of their actual status. The session remains clickable and is included in the count.
 
 ### 2.4 Status Labels
 
@@ -353,17 +357,78 @@ Standardized protocol for external CLI tools to integrate with CC Status Bar.
 | iTerm2 | AppleScript with TTY search |
 | Terminal.app + tmux | tmux select-pane only |
 
-### 9.2 Environment Resolution
+### 9.2 Environment Resolution Priority
 
-`EnvironmentResolver` determines the focus environment for each session:
+`EnvironmentResolver` determines the focus environment with the following priority:
 
-1. Check for editor (VS Code, Cursor, etc.) by `editorBundleID`
-2. Check for Ghostty tab binding
-3. Check for iTerm2 via AppleScript
-4. Check for tmux session
-5. Fall back to unknown
+| Priority | Condition | Detection Method | Rationale |
+|----------|-----------|------------------|-----------|
+| 1 | Editor detected | `editorBundleID` exists | Detected via PPID chain, most reliable |
+| 2 | actualTermProgram | Parent process info inside tmux | Retrieved via `TmuxHelper.getClientTerminalInfo`, highest reliability |
+| 3 | TERM_PROGRAM | Environment variable | Recorded at session start, reliable outside tmux |
+| 4 | Running terminal detection | Tab search by tmux session name | Checks if Ghostty/iTerm2 is running |
+| 5 | Non-tmux fallback | `ghosttyTabIndex` exists or Ghostty running | Default behavior |
+| 6 | Default | Terminal.app | When no other terminal detected |
 
-### 9.3 Icon Display
+### 9.3 Ghostty Focus Strategy
+
+| Condition | Focus Method | Rationale |
+|-----------|--------------|-----------|
+| tmux + tabIndex | TabIndex → Title search | tmux panes are stable, tabIndex is reliable |
+| non-tmux | CCSB token → CC title → Project name | Bind-on-start tabIndex may be stale, so skip it |
+
+**Why tabIndex is not used for non-tmux:**
+
+Bind-on-start records the "currently selected tab" at session start. However:
+1. If user was viewing a different tab before session start, wrong index is recorded
+2. Tab switching is frequent in non-tmux sessions
+3. CCSB token (`[CCSB:ttysNNN]`) is TTY-based and unique, more reliable
+
+For tmux sessions, the pane-tab relationship is stable, so tabIndex remains effective.
+
+### 9.4 Focus Fallback Order
+
+```
+┌─ Ghostty (tmux)
+│  1. Switch tab by tabIndex
+│  2. Search title by tmuxSessionName
+│  3. Search title by projectName
+│  4. Activate Ghostty only
+│
+├─ Ghostty (non-tmux)
+│  1. Search title by CCSB token ← Most reliable
+│  2. Search title by CC title (legacy)
+│  3. Search title by projectName
+│  4. Activate Ghostty only
+│
+├─ iTerm2
+│  1. Select tmux pane (if tmux)
+│  2. Activate via AppleScript
+│
+├─ Terminal.app
+│  1. Select tmux pane (if tmux)
+│  2. Activate
+│
+└─ Editor (VS Code, Cursor, Zed, etc.)
+   1. Activate by PID (multi-instance support)
+   2. bundleID + window title match
+   3. bundleID first instance
+```
+
+### 9.5 CCSB Token Format
+
+To improve reliability for non-tmux Ghostty sessions, a unique token is set in the tab title.
+
+```
+[CC] project-name • ttys023 [CCSB:ttys023]
+ │                          └── Search token (unique per TTY)
+ └── Display title
+```
+
+- `TtyHelper.setTitle()` sends OSC escape sequence
+- 150ms wait before Accessibility API title search
+
+### 9.6 Icon Display
 
 `IconManager` provides application icons for session display:
 
@@ -371,14 +436,16 @@ Standardized protocol for external CLI tools to integrate with CC Status Bar.
 - Supports terminal icons (Ghostty, iTerm2, Terminal.app)
 - Supports editor icons (VS Code, Cursor, etc.)
 
-### 9.4 Implementation
+### 9.7 Implementation
 
 - **File**: `Sources/Services/EnvironmentResolver.swift`
 - **File**: `Sources/Services/FocusManager.swift`
+- **File**: `Sources/Services/GhosttyController.swift`
 - **File**: `Sources/Services/IconManager.swift`
 - **File**: `Sources/Services/GhosttyHelper.swift`
 - **File**: `Sources/Services/ITerm2Helper.swift`
 - **File**: `Sources/Services/TmuxHelper.swift`
+- **File**: `Sources/Services/TtyHelper.swift`
 
 ---
 
@@ -449,11 +516,13 @@ Quick navigation actions available from session submenu.
 
 ### 13.2 Available Actions
 
-| Action | Description |
-|--------|-------------|
-| Open in Finder | Open the session directory in Finder |
-| Copy Path | Copy the working directory path to clipboard |
-| Copy TTY | Copy the TTY device path to clipboard |
+| Action | Description | Condition |
+|--------|-------------|-----------|
+| Copy Attach Command | Copy `tmux attach -t <session>` to clipboard | Only for detached tmux sessions |
+| Kill Session | Kill the tmux session | Only for detached tmux sessions |
+| Open in Finder | Open the session directory in Finder | Always |
+| Copy Path | Copy the working directory path to clipboard | Always |
+| Copy TTY | Copy the TTY device path to clipboard | Only if TTY exists |
 
 ### 13.3 Implementation
 
@@ -486,17 +555,29 @@ Prevent notification spam for the same session in the same state.
 
 ### 15.1 Purpose
 
-Automatically mark sessions as stopped when their TTY device no longer exists.
+Automatically mark sessions as stopped when their associated process no longer exists.
 
-### 15.2 Behavior
+### 15.2 Detection Methods
 
-1. On each file watch event, check if session TTY exists
-2. If TTY doesn't exist and session is running/waiting, mark as stopped
-3. Session timeout handles removal of stopped sessions
+| Session Type | Detection Method | Condition |
+|--------------|------------------|-----------|
+| Terminal (TTY exists) | TTY file existence | `FileManager.fileExists(atPath: tty)` |
+| Editor (no TTY) | Editor PID check | `editorBundleID` set AND `editorPID` set |
 
-### 15.3 Implementation
+### 15.3 Behavior
+
+1. On each file watch event, check each non-stopped session
+2. **TTY-based detection**: If TTY exists but file doesn't exist → mark as stopped
+3. **Editor PID detection**: If no TTY but editorBundleID/PID set, check if editor process is alive
+   - Uses `kill(pid, 0)` for quick existence check
+   - Verifies bundleID matches to prevent false positives from PID reuse
+4. Session timeout handles removal of stopped sessions
+
+### 15.4 Implementation
 
 - **File**: `Sources/Services/SessionObserver.swift`
+- **Method**: `loadSessions()` (stale detection loop)
+- **Method**: `isEditorAlive(pid:expectedBundleID:)`
 - **File**: `Sources/Services/SessionStore.swift`
 - **Method**: `markSessionAsStopped(sessionId:tty:)`
 
@@ -547,3 +628,42 @@ Permissions section added to Copy Diagnostics output.
 - **File**: `Sources/Services/PermissionManager.swift`
 - **File**: `Sources/App/AppDelegate.swift`
 - **Method**: `createPermissionsMenu()`
+
+---
+
+## 18. Detached tmux Session Display
+
+### 18.1 Purpose
+
+Visually distinguish tmux sessions that are detached (terminal tab closed but tmux session still running) from active sessions.
+
+### 18.2 Detection
+
+A tmux session is considered detached when `tmux list-sessions` shows `session_attached=0` for that session.
+
+### 18.3 Display Behavior
+
+- **Color**: Gray (systemGray) regardless of actual status
+- **Clickable**: Yes, clicking will attempt to focus the terminal
+- **Count**: Included in session count (Claude is still running)
+- **Submenu**: Shows "Copy Attach Command" and "Kill Session" at the top
+
+### 18.4 Detached Session Actions
+
+For detached tmux sessions, the submenu includes:
+
+| Action | Description |
+|--------|-------------|
+| Copy Attach Command | Copy `tmux attach -t <session_name>` to clipboard |
+| Kill Session | Terminate the tmux session using `tmux kill-session -t <session_name>` |
+
+### 18.5 Cache
+
+Attach states are cached for 5 seconds to avoid excessive tmux commands.
+
+### 18.6 Implementation
+
+- **File**: `Sources/Services/TmuxHelper.swift`
+- **Methods**: `getSessionAttachStates()`, `isSessionAttached(_:)`, `killSession(_:)`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createSessionMenuItem(_:)`, `createSessionActionsMenu(session:isAcknowledged:isTmuxDetached:)`, `copyAttachCommand(_:)`, `killTmuxSession(_:)`

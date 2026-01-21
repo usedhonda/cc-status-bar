@@ -215,7 +215,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor
     private func rebuildMenu() {
         let menu = NSMenu()
+        buildMenuItems(into: menu)
+        menu.delegate = self
+        statusItem.menu = menu
+    }
 
+    @MainActor
+    private func buildMenuItems(into menu: NSMenu) {
         if sessionObserver.sessions.isEmpty {
             let emptyItem = NSMenuItem(title: "No active sessions", action: nil, keyEquivalent: "")
             emptyItem.isEnabled = false
@@ -258,15 +264,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
-
-        menu.delegate = self
-        statusItem.menu = menu
     }
 
     // MARK: - NSMenuDelegate
 
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        // Rebuild menu with fresh attach states before display
+        TmuxHelper.invalidateAttachStatesCache()
+        menu.removeAllItems()
+        buildMenuItems(into: menu)
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -474,9 +484,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ? .running  // Show as green if acknowledged
             : session.status
 
-        // Symbol color: red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
+        // Check if tmux session is detached
+        var isTmuxDetached = false
+        if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            isTmuxDetached = !TmuxHelper.isSessionAttached(paneInfo.session)
+        }
+
+        // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
         let symbolColor: NSColor
-        if !isAcknowledged && session.status == .waitingInput {
+        if isTmuxDetached {
+            symbolColor = .tertiaryLabelColor  // Grayed out for detached tmux
+        } else if !isAcknowledged && session.status == .waitingInput {
             // Unacknowledged waiting: red for permission_prompt, yellow otherwise
             symbolColor = (session.waitingReason == .permissionPrompt) ? .systemRed : .systemYellow
         } else {
@@ -512,9 +530,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         attributed.append(symbolAttr)
 
+        // Text colors: gray out everything for detached tmux (use tertiaryLabelColor for more visible difference)
+        let primaryTextColor: NSColor = isTmuxDetached ? .tertiaryLabelColor : .labelColor
+        let secondaryTextColor: NSColor = isTmuxDetached ? .quaternaryLabelColor : .secondaryLabelColor
+
         let nameAttr = NSAttributedString(
             string: session.projectName,
             attributes: [
+                .foregroundColor: primaryTextColor,
                 .font: NSFont.boldSystemFont(ofSize: 14)
             ]
         )
@@ -524,7 +547,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let pathAttr = NSAttributedString(
             string: "\n   \(session.displayPath)",
             attributes: [
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .foregroundColor: secondaryTextColor,
                 .font: NSFont.systemFont(ofSize: 12)
             ]
         )
@@ -535,7 +558,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let infoAttr = NSAttributedString(
             string: "\n   \(session.environmentLabel) • \(displayStatus.label) • \(timeStr)",
             attributes: [
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .foregroundColor: secondaryTextColor,
                 .font: NSFont.systemFont(ofSize: 12)
             ]
         )
@@ -544,13 +567,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.attributedTitle = attributed
 
         // Add submenu for quick actions
-        item.submenu = createSessionActionsMenu(session: session, isAcknowledged: isAcknowledged)
+        item.submenu = createSessionActionsMenu(session: session, isAcknowledged: isAcknowledged, isTmuxDetached: isTmuxDetached)
 
         return item
     }
 
-    private func createSessionActionsMenu(session: Session, isAcknowledged: Bool) -> NSMenu {
+    private func createSessionActionsMenu(session: Session, isAcknowledged: Bool, isTmuxDetached: Bool = false) -> NSMenu {
         let menu = NSMenu()
+
+        // Copy Attach Command and Kill Session (only for detached tmux sessions)
+        if isTmuxDetached, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+            let attachItem = NSMenuItem(
+                title: "Copy Attach Command",
+                action: #selector(copyAttachCommand(_:)),
+                keyEquivalent: ""
+            )
+            attachItem.target = self
+            attachItem.representedObject = paneInfo.session
+            menu.addItem(attachItem)
+
+            // Kill Session
+            let killItem = NSMenuItem(
+                title: "Kill Session",
+                action: #selector(killTmuxSession(_:)),
+                keyEquivalent: ""
+            )
+            killItem.target = self
+            // Pass Session, tmuxSession name, and paneInfo to allow graceful termination
+            killItem.representedObject = (session: session, tmuxSession: paneInfo.session, paneInfo: paneInfo)
+            menu.addItem(killItem)
+
+            menu.addItem(NSMenuItem.separator())
+        }
 
         // Open in Finder
         let finderItem = NSMenuItem(
@@ -606,6 +654,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(tty, forType: .string)
         DebugLog.log("[AppDelegate] Copied TTY: \(tty)")
+    }
+
+    @objc private func copyAttachCommand(_ sender: NSMenuItem) {
+        guard let sessionName = sender.representedObject as? String else { return }
+        let command = "tmux attach -t \(sessionName)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        DebugLog.log("[AppDelegate] Copied attach command: \(command)")
+    }
+
+    @MainActor @objc private func killTmuxSession(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? (session: Session, tmuxSession: String, paneInfo: TmuxHelper.PaneInfo) else { return }
+
+        // 1. Send Ctrl+C to interrupt Claude Code gracefully
+        TmuxHelper.sendKeys(info.paneInfo, keys: "C-c")
+
+        // 2. Remove from sessions.json immediately (prevents flicker from stale data)
+        SessionStore.shared.removeSession(sessionId: info.session.sessionId, tty: info.session.tty)
+
+        // 3. Kill tmux session
+        TmuxHelper.killSession(info.tmuxSession)
+
+        // 4. Update UI
+        refreshUI()
     }
 
     private func formatTime(_ date: Date) -> String {

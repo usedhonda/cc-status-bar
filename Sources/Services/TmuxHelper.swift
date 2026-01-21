@@ -27,6 +27,10 @@ enum TmuxHelper {
     private static var terminalCache: [pid_t: (terminal: String?, timestamp: Date)] = [:]
     private static let terminalCacheTTL: TimeInterval = 60.0
 
+    /// Cache for session attach states (TTL: 5 seconds)
+    private static var attachStatesCache: (states: [String: Bool], timestamp: Date)?
+    private static let attachStatesCacheTTL: TimeInterval = 5.0
+
     /// Invalidate pane info cache (called when session file changes)
     static func invalidatePaneInfoCache() {
         paneInfoCache.removeAll()
@@ -37,7 +41,13 @@ enum TmuxHelper {
     static func invalidateAllCaches() {
         paneInfoCache.removeAll()
         terminalCache.removeAll()
+        attachStatesCache = nil
         DebugLog.log("[TmuxHelper] All caches invalidated")
+    }
+
+    /// Invalidate attach states cache only (for menu refresh)
+    static func invalidateAttachStatesCache() {
+        attachStatesCache = nil
     }
 
     // MARK: - Pane Info (Cached)
@@ -90,9 +100,66 @@ enum TmuxHelper {
         return true
     }
 
+    // MARK: - Session Attach States
+
+    /// Get attached status for all tmux sessions
+    /// - Returns: Dictionary of session_name -> is_attached
+    static func getSessionAttachStates() -> [String: Bool] {
+        let now = Date()
+        if let cached = attachStatesCache,
+           now.timeIntervalSince(cached.timestamp) < attachStatesCacheTTL {
+            return cached.states
+        }
+
+        let output = runCommand(tmuxPath, ["list-sessions", "-F", "#{session_name}|#{session_attached}"])
+        var states: [String: Bool] = [:]
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: "|").map(String.init)
+            if parts.count == 2 {
+                states[parts[0]] = (parts[1] == "1")
+            }
+        }
+        attachStatesCache = (states, now)
+        DebugLog.log("[TmuxHelper] Fetched attach states: \(states)")
+        return states
+    }
+
+    /// Check if a specific tmux session is attached
+    static func isSessionAttached(_ sessionName: String) -> Bool {
+        return getSessionAttachStates()[sessionName] ?? false
+    }
+
     /// Run a tmux command and return output
     static func runTmuxCommand(_ args: String...) -> String {
         return runCommand(tmuxPath, args)
+    }
+
+    /// Kill a tmux session by name
+    /// - Parameter sessionName: The name of the tmux session to kill
+    /// - Returns: true if successful
+    @discardableResult
+    static func killSession(_ sessionName: String) -> Bool {
+        let result = runCommand(tmuxPath, ["kill-session", "-t", sessionName])
+        if result.isEmpty || !result.contains("error") {
+            DebugLog.log("[TmuxHelper] Killed tmux session '\(sessionName)'")
+            invalidateAllCaches()
+            return true
+        }
+        DebugLog.log("[TmuxHelper] Failed to kill tmux session '\(sessionName)'")
+        return false
+    }
+
+    /// Send keys to a tmux pane
+    /// - Parameters:
+    ///   - paneInfo: Target pane information
+    ///   - keys: Keys to send (e.g., "C-c" for Ctrl+C)
+    /// - Returns: true if successful
+    @discardableResult
+    static func sendKeys(_ paneInfo: PaneInfo, keys: String) -> Bool {
+        let target = "\(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)"
+        _ = runCommand(tmuxPath, ["send-keys", "-t", target, keys])
+        DebugLog.log("[TmuxHelper] Sent keys '\(keys)' to \(target)")
+        return true
     }
 
     /// Detect the parent terminal application for a tmux session (with caching)
