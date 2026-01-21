@@ -519,7 +519,6 @@ Quick navigation actions available from session submenu.
 | Action | Description | Condition |
 |--------|-------------|-----------|
 | Copy Attach Command | Copy `tmux attach -t <session>` to clipboard | Only for detached tmux sessions |
-| Kill Session | Kill the tmux session | Only for detached tmux sessions |
 | Open in Finder | Open the session directory in Finder | Always |
 | Copy Path | Copy the working directory path to clipboard | Always |
 | Copy TTY | Copy the TTY device path to clipboard | Only if TTY exists |
@@ -646,7 +645,7 @@ A tmux session is considered detached when `tmux list-sessions` shows `session_a
 - **Color**: Gray (systemGray) regardless of actual status
 - **Clickable**: Yes, clicking will attempt to focus the terminal
 - **Count**: Included in session count (Claude is still running)
-- **Submenu**: Shows "Copy Attach Command" and "Kill Session" at the top
+- **Submenu**: Shows "Copy Attach Command" at the top
 
 ### 18.4 Detached Session Actions
 
@@ -655,7 +654,6 @@ For detached tmux sessions, the submenu includes:
 | Action | Description |
 |--------|-------------|
 | Copy Attach Command | Copy `tmux attach -t <session_name>` to clipboard |
-| Kill Session | Terminate the tmux session using `tmux kill-session -t <session_name>` |
 
 ### 18.5 Cache
 
@@ -664,6 +662,6 @@ Attach states are cached for 5 seconds to avoid excessive tmux commands.
 ### 18.6 Implementation
 
 - **File**: `Sources/Services/TmuxHelper.swift`
-- **Methods**: `getSessionAttachStates()`, `isSessionAttached(_:)`, `killSession(_:)`
+- **Methods**: `getSessionAttachStates()`, `isSessionAttached(_:)`
 - **File**: `Sources/App/AppDelegate.swift`
-- **Method**: `createSessionMenuItem(_:)`, `createSessionActionsMenu(session:isAcknowledged:isTmuxDetached:)`, `copyAttachCommand(_:)`, `killTmuxSession(_:)`
+- **Method**: `createSessionMenuItem(_:)`, `createSessionActionsMenu(session:isAcknowledged:isTmuxDetached:)`, `copyAttachCommand(_:)`

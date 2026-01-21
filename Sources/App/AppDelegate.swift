@@ -575,7 +575,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func createSessionActionsMenu(session: Session, isAcknowledged: Bool, isTmuxDetached: Bool = false) -> NSMenu {
         let menu = NSMenu()
 
-        // Copy Attach Command and Kill Session (only for detached tmux sessions)
+        // Copy Attach Command (only for detached tmux sessions)
         if isTmuxDetached, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
             let attachItem = NSMenuItem(
                 title: "Copy Attach Command",
@@ -585,17 +585,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             attachItem.target = self
             attachItem.representedObject = paneInfo.session
             menu.addItem(attachItem)
-
-            // Kill Session
-            let killItem = NSMenuItem(
-                title: "Kill Session",
-                action: #selector(killTmuxSession(_:)),
-                keyEquivalent: ""
-            )
-            killItem.target = self
-            // Pass Session, tmuxSession name, and paneInfo to allow graceful termination
-            killItem.representedObject = (session: session, tmuxSession: paneInfo.session, paneInfo: paneInfo)
-            menu.addItem(killItem)
 
             menu.addItem(NSMenuItem.separator())
         }
@@ -662,22 +651,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
         DebugLog.log("[AppDelegate] Copied attach command: \(command)")
-    }
-
-    @MainActor @objc private func killTmuxSession(_ sender: NSMenuItem) {
-        guard let info = sender.representedObject as? (session: Session, tmuxSession: String, paneInfo: TmuxHelper.PaneInfo) else { return }
-
-        // 1. Send Ctrl+C to interrupt Claude Code gracefully
-        TmuxHelper.sendKeys(info.paneInfo, keys: "C-c")
-
-        // 2. Remove from sessions.json immediately (prevents flicker from stale data)
-        SessionStore.shared.removeSession(sessionId: info.session.sessionId, tty: info.session.tty)
-
-        // 3. Kill tmux session
-        TmuxHelper.killSession(info.tmuxSession)
-
-        // 4. Update UI
-        refreshUI()
     }
 
     private func formatTime(_ date: Date) -> String {
