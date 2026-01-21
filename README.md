@@ -19,7 +19,20 @@ Click the menu to see session details:
    ~/projects/claude/cc-status-bar • Running • 5s ago
 ```
 
-Click a session to focus the corresponding terminal (iTerm2/Terminal.app).
+Access the submenu for quick actions:
+- **Open in Finder** - Open the project directory
+- **Copy Path/TTY** - Copy to clipboard
+
+### Global Hotkey
+Enable **⌘⇧C** (Cmd+Shift+C) in Settings to quickly focus waiting sessions without using the menu bar.
+
+When triggered:
+1. Focuses the highest priority waiting session (red > yellow)
+2. If no waiting sessions, focuses the most recent session
+3. If no sessions, opens the menu
+
+### Notification Actions
+When a session needs attention, notifications include a **Focus Terminal** button for instant access.
 
 ### Auto Setup
 On first launch, the app automatically:
@@ -36,9 +49,14 @@ On first launch, the app automatically:
 | **iTerm2** | Full tab switching by TTY (with or without tmux) |
 
 ### Ghostty without tmux
-By default, Claude Code overrides tab titles to `✳ Claude Code`, making tab switching unreliable.
+CC Status Bar uses OSC escape sequences to set unique tab titles for reliable identification.
 
-**Solution:** Disable title changes in Claude Code settings:
+**Automatic Handling:**
+1. When focusing a session, the app sets a unique title tag `[CCSB:ttysNNN]`
+2. This works even if Claude Code overwrites the title
+3. If auto-detection fails, you'll be prompted to bind the current tab manually
+
+**Optional:** For best results, disable Claude Code's title override:
 ```json
 // ~/.claude/settings.json
 {
@@ -47,8 +65,6 @@ By default, Claude Code overrides tab titles to `✳ Claude Code`, making tab sw
   }
 }
 ```
-
-This preserves project-based tab titles and enables reliable tab switching.
 
 ### Partially Supported
 | Environment | Features |
@@ -97,8 +113,11 @@ open CCStatusBar.app
 
 - **Accessibility**: Required for terminal tab switching (Ghostty)
   - System Settings → Privacy & Security → Accessibility → CCStatusBar ✓
-- **Automation**: Required for iTerm2/Terminal.app control
-  - Granted automatically on first use
+
+### Quick Access
+Open Settings → Permissions to view:
+- Current permission status
+- "Open Accessibility Settings..."
 
 ## How It Works
 

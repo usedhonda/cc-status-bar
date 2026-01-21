@@ -493,6 +493,25 @@ enum GhosttyHelper {
         return getAllTabTitles().contains { titleMatches($0, target: searchString) }
     }
 
+    // MARK: - CCSB Token-based Tab Focus (for non-tmux Ghostty)
+
+    /// Focus the tab containing the CCSB token in its title
+    /// - Parameter tty: TTY device path (e.g., "/dev/ttys023")
+    /// - Returns: true if tab was found and focused
+    static func focusByTtyToken(_ tty: String) -> Bool {
+        let token = TtyHelper.ccsbToken(tty: tty)
+        DebugLog.log("[GhosttyHelper] Searching for CCSB token: '\(token)'")
+        return focusSession(token)
+    }
+
+    /// Check if any tab contains the CCSB token
+    /// - Parameter tty: TTY device path
+    /// - Returns: true if a tab with the token exists
+    static func hasTabWithTtyToken(_ tty: String) -> Bool {
+        let token = TtyHelper.ccsbToken(tty: tty)
+        return getAllTabTitles().contains { $0.contains(token) }
+    }
+
     /// Get all tab titles for debugging
     static func getAllTabTitles() -> [String] {
         guard let pid = ghosttyPid else { return [] }

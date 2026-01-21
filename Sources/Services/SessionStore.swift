@@ -191,6 +191,59 @@ final class SessionStore {
         DebugLog.log("[SessionStore] Session removed: \(key)")
     }
 
+    /// Mark a session as stopped (for stale session cleanup)
+    /// - Parameters:
+    ///   - sessionId: The session ID
+    ///   - tty: Optional TTY device path
+    func markSessionAsStopped(sessionId: String, tty: String?) {
+        var data = loadData()
+        let key: String
+        if let tty = tty, !tty.isEmpty {
+            key = "\(sessionId):\(tty)"
+        } else {
+            key = sessionId
+        }
+
+        guard var session = data.sessions[key] else { return }
+
+        session.status = .stopped
+        session.waitingReason = nil
+        session.isToolRunning = false
+        session.updatedAt = Date()
+
+        data.sessions[key] = session
+        data.updatedAt = Date()
+
+        saveData(data)
+        DebugLog.log("[SessionStore] Session marked as stopped (stale TTY): \(key)")
+    }
+
+    /// Update tab index for a session (manual binding)
+    /// - Parameters:
+    ///   - sessionId: The session ID
+    ///   - tty: Optional TTY device path
+    ///   - tabIndex: The Ghostty tab index to bind
+    func updateTabIndex(sessionId: String, tty: String?, tabIndex: Int) {
+        var data = loadData()
+        let key: String
+        if let tty = tty, !tty.isEmpty {
+            key = "\(sessionId):\(tty)"
+        } else {
+            key = sessionId
+        }
+
+        guard var session = data.sessions[key] else { return }
+
+        session.ghosttyTabIndex = tabIndex
+        session.updatedAt = Date()
+
+        data.sessions[key] = session
+        data.updatedAt = Date()
+
+        saveData(data)
+        DebugLog.log("[SessionStore] Tab index updated to \(tabIndex) for session: \(key)")
+    }
+
     func clearSessions() {
         saveData(StoreData())
     }

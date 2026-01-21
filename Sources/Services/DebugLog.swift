@@ -131,6 +131,16 @@ enum DebugLog {
             info.append("Log File: \(maskPath(logURL.path))")
             info.append("Log File Exists: \(fm.fileExists(atPath: logURL.path))")
         }
+        info.append("")
+
+        // Permissions
+        info.append(PermissionManager.diagnosticsReport())
+        info.append("")
+
+        // Running Terminals
+        info.append("-- Running Terminals --")
+        info.append("Ghostty: \(GhosttyHelper.isRunning ? "Running" : "Not running")")
+        info.append("iTerm2: \(ITerm2Helper.isRunning ? "Running" : "Not running")")
 
         return info.joined(separator: "\n")
     }

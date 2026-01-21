@@ -49,7 +49,7 @@ final class GhosttyController: TerminalController {
 
         let projectName = session.projectName
 
-        // 3. Title-based search (tmux: session name, non-tmux: CC title)
+        // 3. Title-based search (tmux: session name, non-tmux: CCSB token)
         if hasTmux {
             // Try tmux session name first
             if let name = tmuxSessionName, GhosttyHelper.focusSession(name) {
@@ -62,26 +62,32 @@ final class GhosttyController: TerminalController {
                 return .success
             }
         } else if let tty = session.tty {
-            // Non-tmux: search by CC title format "[CC] project • ttysNNN"
-            let ccTitle = TtyHelper.ccTitle(project: projectName, tty: tty)
+            // Non-tmux: Use CCSB token for reliable tab identification
+            // Token format: "[CCSB:ttysNNN]" - unique per TTY
 
-            // First attempt
+            // Step 1: Always set the CCSB token title before searching
+            // This ensures the tab is identifiable even if Claude Code overwrote the title
+            let ccsbToken = TtyHelper.ccsbToken(tty: tty)
+            let ccTitle = TtyHelper.ccTitle(project: projectName, tty: tty)
+            let fullTitle = "\(ccTitle) \(ccsbToken)"
+
+            DebugLog.log("[GhosttyController] Setting title with CCSB token: '\(fullTitle)'")
+            TtyHelper.setTitle(fullTitle, tty: tty)
+            usleep(150_000)  // 150ms wait for title update and AX tree refresh
+
+            // Step 2: Search by CCSB token (most reliable)
+            if GhosttyHelper.focusByTtyToken(tty) {
+                DebugLog.log("[GhosttyController] Focused tab by CCSB token")
+                return .success
+            }
+
+            // Step 3: Fallback to CC title search (legacy support)
             if GhosttyHelper.focusSession(ccTitle) {
                 DebugLog.log("[GhosttyController] Focused tab by CC title '\(ccTitle)'")
                 return .success
             }
 
-            // Heal: re-assert title and retry (in case Claude Code overwrote the title)
-            DebugLog.log("[GhosttyController] CC title not found, re-asserting title...")
-            TtyHelper.setTitle(ccTitle, tty: tty)
-            usleep(100_000)  // 100ms wait for AX tree update
-
-            if GhosttyHelper.focusSession(ccTitle) {
-                DebugLog.log("[GhosttyController] Focused tab after re-assert '\(ccTitle)'")
-                return .success
-            }
-
-            // Fallback: try project name only (handles partial matches)
+            // Step 4: Last resort - try project name only
             if GhosttyHelper.focusSession(projectName) {
                 DebugLog.log("[GhosttyController] Focused tab for project '\(projectName)'")
                 return .success

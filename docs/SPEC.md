@@ -199,7 +199,7 @@ Settings >
 | Setting | Default |
 |---------|---------|
 | Launch at Login | false |
-| Notifications | true |
+| Notifications | false |
 | Session Timeout | 60 minutes |
 
 ### 5.2 Implementation
@@ -402,3 +402,142 @@ Diagnostics output masks sensitive information:
 - **File**: `Sources/Services/DebugLog.swift`
 - **Method**: `collectDiagnostics()`
 - **Private methods**: `maskPath(_:)`, `maskTTY(_:)`
+
+---
+
+## 12. Global Hotkey
+
+### 12.1 Purpose
+
+Quick keyboard access to focus waiting sessions without using the menu bar.
+
+### 12.2 Default Hotkey
+
+**⌘⇧C** (Cmd+Shift+C) - disabled by default, must be enabled in Settings.
+
+### 12.3 Behavior
+
+1. If waiting sessions exist (red or yellow), focus the highest priority one
+2. Priority: Red (permission_prompt) > Yellow (stop/unknown)
+3. If no waiting sessions, focus the most recent session
+4. If no sessions at all, show the menu
+
+### 12.4 Settings
+
+- Key: `hotkeyEnabled` (UserDefaults)
+- Default: `false`
+
+### 12.5 Implementation
+
+- **File**: `Sources/Services/HotkeyManager.swift`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `setupHotkey()`, `handleHotkeyPressed()`
+
+---
+
+## 13. Session Quick Actions
+
+### 13.1 Purpose
+
+Quick navigation actions available from session submenu.
+
+### 13.2 Available Actions
+
+| Action | Description |
+|--------|-------------|
+| Open in Finder | Open the session directory in Finder |
+| Copy Path | Copy the working directory path to clipboard |
+| Copy TTY | Copy the TTY device path to clipboard |
+
+### 13.3 Implementation
+
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createSessionActionsMenu(session:isAcknowledged:)`
+
+---
+
+## 14. Notification Cooldown
+
+### 14.1 Purpose
+
+Prevent notification spam for the same session in the same state.
+
+### 14.2 Behavior
+
+- Same session + same status = max 1 notification per 5 minutes
+- Status change resets the cooldown
+- Session returning to running clears the cooldown
+
+### 14.3 Implementation
+
+- **File**: `Sources/Services/NotificationManager.swift`
+- **Property**: `notificationCooldowns`
+- **Method**: `clearCooldown(sessionId:)`
+
+---
+
+## 15. Stale Session Cleanup
+
+### 15.1 Purpose
+
+Automatically mark sessions as stopped when their TTY device no longer exists.
+
+### 15.2 Behavior
+
+1. On each file watch event, check if session TTY exists
+2. If TTY doesn't exist and session is running/waiting, mark as stopped
+3. Session timeout handles removal of stopped sessions
+
+### 15.3 Implementation
+
+- **File**: `Sources/Services/SessionObserver.swift`
+- **File**: `Sources/Services/SessionStore.swift`
+- **Method**: `markSessionAsStopped(sessionId:tty:)`
+
+---
+
+## 16. Tab Binding
+
+### 16.1 Purpose
+
+Allow users to manually bind a Ghostty tab when automatic detection fails.
+
+### 16.2 Behavior
+
+1. On partial focus success, offer to bind the current tab
+2. User confirms with "Bind This Tab" button
+3. Tab index is saved for future focus operations
+
+### 16.3 Implementation
+
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `offerTabBinding(for:reason:)`, `showBindingAlert(for:tabIndex:)`
+- **File**: `Sources/Services/SessionStore.swift`
+- **Method**: `updateTabIndex(sessionId:tty:tabIndex:)`
+
+---
+
+## 17. Permission Management
+
+### 17.1 Purpose
+
+Easy access to macOS permission settings when focus operations fail.
+
+### 17.2 Settings Menu
+
+```
+Settings > Permissions >
+├── ✓/✗ Accessibility status
+├── ─────────────
+└── Open Accessibility Settings...
+```
+
+### 17.3 Diagnostics
+
+Permissions section added to Copy Diagnostics output.
+
+### 17.4 Implementation
+
+- **File**: `Sources/Services/PermissionManager.swift`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createPermissionsMenu()`
