@@ -115,13 +115,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessionObserver.acknowledge(sessionId: session.id)
             refreshUI()
             DebugLog.log("[AppDelegate] Hotkey focused session: \(session.projectName)")
-        } else if let session = sessionObserver.sessions.first {
-            // No waiting sessions - focus the most recent session
-            focusTerminal(for: session)
-            DebugLog.log("[AppDelegate] Hotkey focused most recent session: \(session.projectName)")
         } else {
-            // No sessions - show the menu
+            // No waiting sessions (all green or no sessions) - show the menu
             statusItem.button?.performClick(nil)
+            DebugLog.log("[AppDelegate] Hotkey opened menu (no waiting sessions)")
         }
     }
 
@@ -509,8 +506,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Set icon using NSMenuItem.image (auto-aligned by macOS)
+        // Use iconWithBadge to show tab number for Ghostty
         let env = EnvironmentResolver.shared.resolve(session: session)
-        if let icon = IconManager.shared.icon(for: env, size: 48) {
+        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48) {
             item.image = icon
         }
 
