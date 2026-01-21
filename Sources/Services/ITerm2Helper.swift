@@ -124,6 +124,109 @@ enum ITerm2Helper {
         return true
     }
 
+    /// Get tab index by TTY (0-based)
+    /// Searches sessions in the current window by TTY device path
+    /// - Parameter tty: The TTY device path (e.g., "/dev/ttys001")
+    /// - Returns: Tab index (0-based) if found, nil otherwise
+    static func getTabIndexByTTY(_ tty: String) -> Int? {
+        guard isRunning else { return nil }
+
+        let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
+
+        // Search for session with matching TTY and return its tab index
+        let script = """
+            tell application "iTerm"
+                try
+                    set w to current window
+                    if w is missing value then return "-1"
+                    set tabList to tabs of w
+                    repeat with i from 1 to count of tabList
+                        set t to item i of tabList
+                        repeat with s in sessions of t
+                            if tty of s is "\(escapedTTY)" then
+                                return (i - 1) as string
+                            end if
+                        end repeat
+                    end repeat
+                    return "-1"
+                on error errMsg
+                    return "-1"
+                end try
+            end tell
+            """
+
+        guard let appleScript = NSAppleScript(source: script) else {
+            return nil
+        }
+
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+
+        if error != nil {
+            return nil
+        }
+
+        guard let indexStr = result.stringValue,
+              let index = Int(indexStr),
+              index >= 0 else {
+            return nil
+        }
+
+        DebugLog.log("[ITerm2Helper] Found tab index \(index) for TTY '\(tty)'")
+        return index
+    }
+
+    /// Get tab index by searching for a matching session name (0-based)
+    /// Searches tabs in the first window
+    /// - Parameter sessionName: The session name to search for (e.g., tmux session name)
+    /// - Returns: Tab index (0-based) if found, nil otherwise
+    static func getTabIndexByName(_ sessionName: String) -> Int? {
+        guard isRunning else { return nil }
+
+        let escapedName = sessionName.replacingOccurrences(of: "\"", with: "\\\"")
+
+        // Search for tab whose name contains the session name and return its index
+        let script = """
+            tell application "iTerm"
+                try
+                    set w to current window
+                    if w is missing value then return "-1"
+                    set tabList to tabs of w
+                    repeat with i from 1 to count of tabList
+                        set t to item i of tabList
+                        set tabName to name of current session of t
+                        if tabName contains "\(escapedName)" then
+                            return (i - 1) as string
+                        end if
+                    end repeat
+                    return "-1"
+                on error errMsg
+                    return "-1"
+                end try
+            end tell
+            """
+
+        guard let appleScript = NSAppleScript(source: script) else {
+            return nil
+        }
+
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+
+        if error != nil {
+            return nil
+        }
+
+        guard let indexStr = result.stringValue,
+              let index = Int(indexStr),
+              index >= 0 else {
+            return nil
+        }
+
+        DebugLog.log("[ITerm2Helper] Found tab index \(index) for '\(sessionName)'")
+        return index
+    }
+
     /// Focus session by name/title (for tmux sessions)
     /// Searches all tabs in all windows for a session whose name contains the search term
     /// - Parameter sessionName: The session name to search for (e.g., tmux session name)

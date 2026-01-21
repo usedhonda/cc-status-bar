@@ -13,9 +13,9 @@ final class HotkeyManager: ObservableObject {
     private var hotkeyRef: EventHotKeyRef?
     private var isRegistered = false
 
-    // Default hotkey: Cmd+Shift+C
+    // Default hotkey: Cmd+Ctrl+C
     private let defaultKeyCode: UInt32 = UInt32(kVK_ANSI_C)
-    private let defaultModifiers: UInt32 = UInt32(cmdKey | shiftKey)
+    private let defaultModifiers: UInt32 = UInt32(cmdKey | controlKey)
 
     // UserDefaults keys
     private let keyCodeKey = "hotkeyKeyCode"

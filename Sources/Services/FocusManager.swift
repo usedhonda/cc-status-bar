@@ -25,7 +25,8 @@ final class FocusManager {
                 case "ghostty":
                     env = .ghostty(hasTmux: true, tabIndex: session.ghosttyTabIndex, tmuxSessionName: tmuxName)
                 case "iterm.app":
-                    env = .iterm2(hasTmux: true, tmuxSessionName: tmuxName)
+                    let tabIndex = ITerm2Helper.getTabIndexByName(tmuxName)
+                    env = .iterm2(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: tmuxName)
                 case "apple_terminal":
                     env = .terminal(hasTmux: true, tmuxSessionName: tmuxName)
                 default:
@@ -54,7 +55,7 @@ final class FocusManager {
                 tmuxSessionName: tmuxSessionName
             )
 
-        case .iterm2(let hasTmux, let tmuxSessionName):
+        case .iterm2(let hasTmux, _, let tmuxSessionName):
             return ITerm2Controller.shared.focus(
                 session: session,
                 hasTmux: hasTmux,

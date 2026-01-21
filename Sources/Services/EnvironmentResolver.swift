@@ -5,7 +5,7 @@ import Foundation
 enum FocusEnvironment {
     case editor(bundleID: String, pid: pid_t?, hasTmux: Bool, tmuxSessionName: String?)
     case ghostty(hasTmux: Bool, tabIndex: Int?, tmuxSessionName: String?)
-    case iterm2(hasTmux: Bool, tmuxSessionName: String?)
+    case iterm2(hasTmux: Bool, tabIndex: Int?, tmuxSessionName: String?)
     case terminal(hasTmux: Bool, tmuxSessionName: String?)
     case tmuxOnly(sessionName: String)
     case unknown
@@ -17,7 +17,7 @@ enum FocusEnvironment {
             return hasTmux ? "\(name)/tmux" : name
         case .ghostty(let hasTmux, _, _):
             return hasTmux ? "Ghostty/tmux" : "Ghostty"
-        case .iterm2(let hasTmux, _):
+        case .iterm2(let hasTmux, _, _):
             return hasTmux ? "iTerm2/tmux" : "iTerm2"
         case .terminal(let hasTmux, _):
             return hasTmux ? "Terminal/tmux" : "Terminal"
@@ -32,7 +32,7 @@ enum FocusEnvironment {
         switch self {
         case .editor(_, _, let hasTmux, _): return hasTmux
         case .ghostty(let hasTmux, _, _): return hasTmux
-        case .iterm2(let hasTmux, _): return hasTmux
+        case .iterm2(let hasTmux, _, _): return hasTmux
         case .terminal(let hasTmux, _): return hasTmux
         case .tmuxOnly: return true
         case .unknown: return false
@@ -43,7 +43,7 @@ enum FocusEnvironment {
         switch self {
         case .editor(_, _, _, let name): return name
         case .ghostty(_, _, let name): return name
-        case .iterm2(_, let name): return name
+        case .iterm2(_, _, let name): return name
         case .terminal(_, let name): return name
         case .tmuxOnly(let name): return name
         case .unknown: return nil
@@ -81,14 +81,20 @@ final class EnvironmentResolver {
         if let actualProg = session.actualTermProgram?.lowercased() {
             switch actualProg {
             case "ghostty":
+                // Use stored tabIndex, or dynamically find by tmux session name
+                let tabIndex = session.ghosttyTabIndex ?? tmuxSessionName.flatMap { GhosttyHelper.getTabIndexByTitle($0) }
                 return .ghostty(
                     hasTmux: hasTmux,
-                    tabIndex: session.ghosttyTabIndex,
+                    tabIndex: tabIndex,
                     tmuxSessionName: tmuxSessionName
                 )
             case "iterm.app":
+                // tmux: search by session name, non-tmux: search by TTY
+                let tabIndex = tmuxSessionName.flatMap { ITerm2Helper.getTabIndexByName($0) }
+                    ?? session.tty.flatMap { ITerm2Helper.getTabIndexByTTY($0) }
                 return .iterm2(
                     hasTmux: hasTmux,
+                    tabIndex: tabIndex,
                     tmuxSessionName: tmuxSessionName
                 )
             case "apple_terminal":
@@ -105,14 +111,20 @@ final class EnvironmentResolver {
         if let prog = session.termProgram?.lowercased() {
             switch prog {
             case "ghostty":
+                // Use stored tabIndex, or dynamically find by tmux session name
+                let tabIndex = session.ghosttyTabIndex ?? tmuxSessionName.flatMap { GhosttyHelper.getTabIndexByTitle($0) }
                 return .ghostty(
                     hasTmux: hasTmux,
-                    tabIndex: session.ghosttyTabIndex,
+                    tabIndex: tabIndex,
                     tmuxSessionName: tmuxSessionName
                 )
             case "iterm.app":
+                // tmux: search by session name, non-tmux: search by TTY
+                let tabIndex = tmuxSessionName.flatMap { ITerm2Helper.getTabIndexByName($0) }
+                    ?? session.tty.flatMap { ITerm2Helper.getTabIndexByTTY($0) }
                 return .iterm2(
                     hasTmux: hasTmux,
+                    tabIndex: tabIndex,
                     tmuxSessionName: tmuxSessionName
                 )
             case "apple_terminal":
@@ -139,27 +151,32 @@ final class EnvironmentResolver {
             // Check if Ghostty has a tab with this tmux session name
             if GhosttyHelper.isRunning,
                let name = tmuxSessionName,
-               GhosttyHelper.hasTabWithTitle(name) {
-                return .ghostty(hasTmux: true, tabIndex: nil, tmuxSessionName: name)
+               let tabIndex = GhosttyHelper.getTabIndexByTitle(name) {
+                return .ghostty(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
             }
             // Check if iTerm2 is running
-            if ITerm2Helper.isRunning {
-                return .iterm2(hasTmux: true, tmuxSessionName: tmuxSessionName)
+            if ITerm2Helper.isRunning, let name = tmuxSessionName {
+                let tabIndex = ITerm2Helper.getTabIndexByName(name)
+                return .iterm2(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
             }
             // tmux only (no known terminal)
             return .tmuxOnly(sessionName: tmuxSessionName ?? "unknown")
         }
 
-        // Priority 5: Non-tmux detection
+        // Priority 5: Non-tmux detection - identify terminal by TTY lookup
+        // Try iTerm2 TTY lookup first (most reliable for non-tmux)
+        if ITerm2Helper.isRunning,
+           let tty = session.tty,
+           let tabIndex = ITerm2Helper.getTabIndexByTTY(tty) {
+            return .iterm2(hasTmux: false, tabIndex: tabIndex, tmuxSessionName: nil)
+        }
+        // Then check Ghostty
         if session.ghosttyTabIndex != nil || GhosttyHelper.isRunning {
             return .ghostty(
                 hasTmux: false,
                 tabIndex: session.ghosttyTabIndex,
                 tmuxSessionName: nil
             )
-        }
-        if ITerm2Helper.isRunning {
-            return .iterm2(hasTmux: false, tmuxSessionName: nil)
         }
 
         // Fallback: Terminal.app or unknown

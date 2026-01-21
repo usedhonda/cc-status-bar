@@ -505,6 +505,21 @@ enum GhosttyHelper {
         return getAllTabTitles().contains { titleMatches($0, target: searchString) }
     }
 
+    /// Get tab index by searching for a matching title (0-based)
+    /// Useful for finding Ghostty tab index for tmux sessions
+    /// - Parameter searchString: String to search for in tab titles (e.g., tmux session name)
+    /// - Returns: Tab index (0-based) if found, nil otherwise
+    static func getTabIndexByTitle(_ searchString: String) -> Int? {
+        let titles = getAllTabTitles()
+        for (index, title) in titles.enumerated() {
+            if titleMatches(title, target: searchString) {
+                DebugLog.log("[GhosttyHelper] Found tab index \(index) for '\(searchString)' (title: '\(title)')")
+                return index
+            }
+        }
+        return nil
+    }
+
     // MARK: - CCSB Token-based Tab Focus (for non-tmux Ghostty)
 
     /// Focus the tab containing the CCSB token in its title

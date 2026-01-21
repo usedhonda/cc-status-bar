@@ -67,6 +67,75 @@ final class IconManager {
         }
     }
 
+    /// Get icon with tab number badge for a FocusEnvironment
+    /// - Parameters:
+    ///   - env: Focus environment
+    ///   - size: Icon size (default 16x16)
+    /// - Returns: Application icon with badge (for Ghostty tabs) or regular icon
+    func iconWithBadge(for env: FocusEnvironment, size: CGFloat = 16) -> NSImage? {
+        guard let baseIcon = icon(for: env, size: size) else { return nil }
+
+        // Only add badge for Ghostty or iTerm2 with tab index
+        let tabIndex: Int
+        switch env {
+        case .ghostty(_, let idx?, _):
+            tabIndex = idx
+        case .iterm2(_, let idx?, _):
+            tabIndex = idx
+        default:
+            return baseIcon
+        }
+
+        // 1-based display (tab 0 -> display "1")
+        let badgeText = "\(tabIndex + 1)"
+
+        // Create new image with badge
+        let newImage = NSImage(size: baseIcon.size)
+        newImage.lockFocus()
+
+        // Draw base icon
+        baseIcon.draw(at: .zero, from: .zero, operation: .copy, fraction: 1.0)
+
+        // Badge configuration (bottom-right, rounded rectangle)
+        let badgeHeight = size * 0.32
+        let badgeWidth = badgeHeight * 0.85
+        let cornerRadius = badgeHeight * 0.2
+        let margin = size * 0.02  // Small margin from edge
+
+        // Position at bottom-right
+        let badgeRect = NSRect(
+            x: size - badgeWidth - margin,
+            y: margin,
+            width: badgeWidth,
+            height: badgeHeight
+        )
+
+        // Draw badge background (white rounded rectangle with border)
+        let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: cornerRadius, yRadius: cornerRadius)
+        NSColor.white.setFill()
+        badgePath.fill()
+        NSColor.systemGray.setStroke()
+        badgePath.lineWidth = 0.5
+        badgePath.stroke()
+
+        // Draw badge text
+        let fontSize = badgeHeight * 0.65
+        let font = NSFont.boldSystemFont(ofSize: fontSize)
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.darkGray
+        ]
+        let textSize = badgeText.size(withAttributes: textAttrs)
+        let textPoint = NSPoint(
+            x: badgeRect.midX - textSize.width / 2,
+            y: badgeRect.midY - textSize.height / 2
+        )
+        badgeText.draw(at: textPoint, withAttributes: textAttrs)
+
+        newImage.unlockFocus()
+        return newImage
+    }
+
     // MARK: - Private
 
     private func fetchIcon(for bundleID: String, size: CGFloat) -> NSImage? {

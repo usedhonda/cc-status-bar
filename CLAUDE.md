@@ -163,6 +163,20 @@ Release procedure is documented in `.local/release.md` (local only, not committe
 - SPEC.md: Implementation specifications (no line numbers, reference by method name)
 - Update both when adding/removing/changing features
 
+## Pre-commit/Pre-push Check (MANDATORY)
+
+コミットやプッシュを行う前に、**必ず `/publish-check` スキルを実行すること**。
+
+| 操作 | トリガーワード |
+|------|---------------|
+| git commit | コミット, commit |
+| git push | プッシュ, push, 上げて, あげて |
+| release | リリース, release, deploy, デプロイ |
+
+**禁止**: `/publish-check` を実行せずにコミット/プッシュを行うこと
+
+---
+
 ## Git Commit
 
 ### Pre-commit Check (Required)

@@ -354,21 +354,48 @@ Standardized protocol for external CLI tools to integrate with CC Status Bar.
 |-------------|--------------|
 | Ghostty + tmux | Tab switch via Accessibility API + tmux select-pane |
 | Ghostty (no tmux) | Tab switch via Accessibility API |
-| iTerm2 | AppleScript with TTY search |
+| iTerm2 + tmux | Tab switch by session name + tmux select-pane |
+| iTerm2 (no tmux) | Tab switch by TTY lookup |
 | Terminal.app + tmux | tmux select-pane only |
+| VS Code / Cursor / Windsurf / editors | Activate by PID + window title matching via AX API |
+
+**Supported Editors (EditorDetector):**
+
+| Bundle ID | Display Name |
+|-----------|--------------|
+| com.microsoft.VSCode | VS Code |
+| com.microsoft.VSCodeInsiders | VS Code |
+| com.todesktop.230313mzl4w4u92 | Cursor |
+| co.anysphere.cursor.nightly | Cursor |
+| com.exafunction.windsurf | Windsurf |
+| com.vscodium | VSCodium |
+| com.positron.positron | Positron |
+| com.byte.trae | Trae |
+| dev.zed.Zed | Zed |
+
+**Note:** The VS Code Claude extension's Native UI (sidebar chat) does not trigger hooks - CCStatusBar cannot detect these sessions.
+
+**To enable detection:** Set `"claudeCode.useTerminal": true` in VS Code settings, or run `claude` directly in the integrated terminal.
 
 ### 9.2 Environment Resolution Priority
 
 `EnvironmentResolver` determines the focus environment with the following priority:
 
-| Priority | Condition | Detection Method | Rationale |
-|----------|-----------|------------------|-----------|
-| 1 | Editor detected | `editorBundleID` exists | Detected via PPID chain, most reliable |
-| 2 | actualTermProgram | Parent process info inside tmux | Retrieved via `TmuxHelper.getClientTerminalInfo`, highest reliability |
-| 3 | TERM_PROGRAM | Environment variable | Recorded at session start, reliable outside tmux |
-| 4 | Running terminal detection | Tab search by tmux session name | Checks if Ghostty/iTerm2 is running |
-| 5 | Non-tmux fallback | `ghosttyTabIndex` exists or Ghostty running | Default behavior |
-| 6 | Default | Terminal.app | When no other terminal detected |
+| Priority | Condition | Detection Method | Tab Index Method |
+|----------|-----------|------------------|------------------|
+| 1 | Editor detected | `editorBundleID` exists | N/A |
+| 2 | actualTermProgram | Parent process info inside tmux | tmux: session name, non-tmux: TTY lookup |
+| 3 | TERM_PROGRAM | Environment variable | tmux: session name, non-tmux: TTY lookup |
+| 4 | Running terminal (tmux) | Tab search by tmux session name | Session name search |
+| 5 | Non-tmux fallback | iTerm2 TTY lookup → Ghostty | iTerm2: TTY lookup, Ghostty: stored tabIndex |
+| 6 | Default | Terminal.app | N/A |
+
+**Tab Index Detection by Terminal:**
+
+| Terminal | tmux | non-tmux |
+|----------|------|----------|
+| Ghostty | `getTabIndexByTitle(tmuxSessionName)` | `ghosttyTabIndex` (bind-on-start) |
+| iTerm2 | `getTabIndexByName(tmuxSessionName)` | `getTabIndexByTTY(tty)` |
 
 ### 9.3 Ghostty Focus Strategy
 
@@ -401,8 +428,13 @@ For tmux sessions, the pane-tab relationship is stable, so tabIndex remains effe
 │  3. Search title by projectName
 │  4. Activate Ghostty only
 │
-├─ iTerm2
-│  1. Select tmux pane (if tmux)
+├─ iTerm2 (tmux)
+│  1. Switch tab by session name
+│  2. Select tmux pane
+│  3. Activate via AppleScript
+│
+├─ iTerm2 (non-tmux)
+│  1. Switch tab by TTY lookup ← getTabIndexByTTY()
 │  2. Activate via AppleScript
 │
 ├─ Terminal.app

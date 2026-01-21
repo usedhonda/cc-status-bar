@@ -47,6 +47,31 @@ On first launch, the app automatically:
 |-------------|----------|
 | **Ghostty + tmux** | Full tab switching and pane focus |
 | **iTerm2** | Full tab switching by TTY (with or without tmux) |
+| **VS Code / Cursor / Windsurf** | Window focus by project name matching |
+
+### VS Code and Similar Editors
+
+CC Status Bar supports VS Code, Cursor, Windsurf, VSCodium, Positron, Trae, and Zed.
+
+**Important:** The VS Code Claude extension's Native UI (sidebar chat) does not support hooks - CCStatusBar cannot detect these sessions.
+
+**Setup for VS Code Claude Extension:**
+
+Enable Terminal Mode in VS Code settings:
+```json
+// settings.json
+{
+  "claudeCode.useTerminal": true
+}
+```
+
+Or run `claude` directly in VS Code's integrated terminal.
+
+**How it works:**
+1. Claude Code runs in Terminal Mode (or integrated terminal)
+2. CC Status Bar detects the editor via PPID chain inspection
+3. Session displays with the editor name (e.g., "VS Code", "Cursor")
+4. Clicking the session focuses the correct editor window
 
 ### Ghostty without tmux
 CC Status Bar uses OSC escape sequences to set unique tab titles for reliable identification.
@@ -72,7 +97,6 @@ CC Status Bar uses OSC escape sequences to set unique tab titles for reliable id
 | **Terminal.app + tmux** | Pane focus only |
 
 ### Not Supported
-- VS Code integrated terminal (limited external API)
 - Warp (limited external tab control API)
 - Non-tmux environments with multiple tabs (TTY identification difficult)
 
