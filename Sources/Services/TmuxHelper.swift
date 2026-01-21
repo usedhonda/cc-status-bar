@@ -7,10 +7,61 @@ enum TmuxHelper {
         let pane: String
     }
 
-    /// TTY から tmux ペイン情報を取得
+    // MARK: - Caching Infrastructure
+
+    /// Static cache for tmux binary path (never changes during app lifetime)
+    private static let tmuxPath: String = {
+        for path in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return "tmux"  // Fallback to PATH
+    }()
+
+    /// Cache for pane info by TTY (TTL: 5 seconds)
+    private static var paneInfoCache: [String: (info: PaneInfo?, timestamp: Date)] = [:]
+    private static let paneCacheTTL: TimeInterval = 5.0
+
+    /// Cache for terminal detection by PID (TTL: 60 seconds)
+    private static var terminalCache: [pid_t: (terminal: String?, timestamp: Date)] = [:]
+    private static let terminalCacheTTL: TimeInterval = 60.0
+
+    /// Invalidate pane info cache (called when session file changes)
+    static func invalidatePaneInfoCache() {
+        paneInfoCache.removeAll()
+        DebugLog.log("[TmuxHelper] Pane info cache invalidated")
+    }
+
+    /// Invalidate all caches
+    static func invalidateAllCaches() {
+        paneInfoCache.removeAll()
+        terminalCache.removeAll()
+        DebugLog.log("[TmuxHelper] All caches invalidated")
+    }
+
+    // MARK: - Pane Info (Cached)
+
+    /// TTY から tmux ペイン情報を取得 (with caching)
     static func getPaneInfo(for tty: String) -> PaneInfo? {
-        let tmux = findTmux()
-        let output = runCommand(tmux, ["list-panes", "-a",
+        let now = Date()
+
+        // Check cache
+        if let cached = paneInfoCache[tty],
+           now.timeIntervalSince(cached.timestamp) < paneCacheTTL {
+            DebugLog.log("[TmuxHelper] Cache hit for TTY \(tty)")
+            return cached.info
+        }
+
+        // Cache miss - fetch from tmux
+        let info = fetchPaneInfoFromTmux(tty)
+        paneInfoCache[tty] = (info, now)
+        return info
+    }
+
+    /// Fetch pane info directly from tmux (no cache)
+    private static func fetchPaneInfoFromTmux(_ tty: String) -> PaneInfo? {
+        let output = runCommand(tmuxPath, ["list-panes", "-a",
             "-F", "#{pane_tty}|#{session_name}|#{window_index}|#{pane_index}"])
 
         for line in output.split(separator: "\n") {
@@ -26,49 +77,30 @@ enum TmuxHelper {
 
     /// ウィンドウとペインを選択（アクティブに）
     static func selectPane(_ info: PaneInfo) -> Bool {
-        let tmux = findTmux()
         let windowTarget = "\(info.session):\(info.window)"
         let paneTarget = "\(info.session):\(info.window).\(info.pane)"
 
         // 1. ウィンドウを選択（タブ切り替え）
-        _ = runCommand(tmux, ["select-window", "-t", windowTarget])
+        _ = runCommand(tmuxPath, ["select-window", "-t", windowTarget])
 
         // 2. ペインを選択
-        _ = runCommand(tmux, ["select-pane", "-t", paneTarget])
+        _ = runCommand(tmuxPath, ["select-pane", "-t", paneTarget])
 
         DebugLog.log("[TmuxHelper] Selected pane: \(paneTarget)")
         return true
     }
 
-    /// tmux の絶対パスを取得
-    private static func findTmux() -> String {
-        let candidates = [
-            "/opt/homebrew/bin/tmux",  // Apple Silicon
-            "/usr/local/bin/tmux",     // Intel Mac
-            "/usr/bin/tmux"            // System
-        ]
-        for path in candidates {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
-        }
-        return "tmux" // Fallback to PATH
-    }
-
     /// Run a tmux command and return output
     static func runTmuxCommand(_ args: String...) -> String {
-        let tmux = findTmux()
-        return runCommand(tmux, args)
+        return runCommand(tmuxPath, args)
     }
 
-    /// Detect the parent terminal application for a tmux session
+    /// Detect the parent terminal application for a tmux session (with caching)
     /// - Parameter sessionName: The tmux session name (e.g., "chrome-ai-bridge")
     /// - Returns: Terminal identifier (e.g., "ghostty", "iTerm.app") or nil
     static func getClientTerminalInfo(for sessionName: String) -> String? {
-        let tmux = findTmux()
-
         // Get all clients with their PID and session
-        let output = runCommand(tmux, ["list-clients", "-F", "#{client_pid}|#{client_session}"])
+        let output = runCommand(tmuxPath, ["list-clients", "-F", "#{client_pid}|#{client_session}"])
 
         // Find the client attached to this session
         var clientPid: pid_t?
@@ -96,8 +128,17 @@ enum TmuxHelper {
             return nil
         }
 
-        // Trace parent process chain to find terminal
+        // Check terminal cache
+        let now = Date()
+        if let cached = terminalCache[pid],
+           now.timeIntervalSince(cached.timestamp) < terminalCacheTTL {
+            DebugLog.log("[TmuxHelper] Terminal cache hit for PID \(pid)")
+            return cached.terminal
+        }
+
+        // Cache miss - trace parent process chain to find terminal
         let terminalInfo = traceParentToTerminal(pid: pid)
+        terminalCache[pid] = (terminalInfo, now)
         DebugLog.log("[TmuxHelper] Session '\(sessionName)' client PID \(pid) -> terminal: \(terminalInfo ?? "unknown")")
         return terminalInfo
     }

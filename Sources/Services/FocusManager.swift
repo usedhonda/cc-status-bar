@@ -100,7 +100,7 @@ final class FocusManager {
                 let activated = app.activate(options: [.activateIgnoringOtherApps])
                 if activated {
                     DebugLog.log("[FocusManager] Activated editor by PID \(pid)")
-                    raiseMainWindow(pid: pid)
+                    raiseWindowByProjectName(pid: pid, projectName: session.projectName)
                     return .success
                 }
             }
@@ -136,15 +136,31 @@ final class FocusManager {
         }
     }
 
-    /// Raise main window using Accessibility API for reliability
-    private func raiseMainWindow(pid: pid_t) {
+    /// Raise window matching project name, or first window as fallback
+    private func raiseWindowByProjectName(pid: pid_t, projectName: String) {
         let appElement = AXUIElementCreateApplication(pid)
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
               let windows = windowsRef as? [AXUIElement],
-              let mainWindow = windows.first else { return }
+              !windows.isEmpty else { return }
 
-        AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
+        // Search for window with matching project name in title
+        for window in windows {
+            var titleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+               let title = titleRef as? String,
+               title.lowercased().contains(projectName.lowercased()) {
+                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                DebugLog.log("[FocusManager] Raised window '\(title)' for project '\(projectName)'")
+                return
+            }
+        }
+
+        // Fallback: raise first window
+        if let firstWindow = windows.first {
+            AXUIElementPerformAction(firstWindow, kAXRaiseAction as CFString)
+            DebugLog.log("[FocusManager] Fallback: raised first window")
+        }
     }
 
     /// Find the app and window containing the project name

@@ -14,6 +14,9 @@ final class SessionObserver: ObservableObject {
     private var acknowledgedSessionIds: Set<String> = []  // Sessions user has seen (for yellow->green)
     private var isInitialLoad = true  // Skip notifications on first load to avoid spam at startup
 
+    /// Debounce work item for file watch events
+    private var loadDebounceWorkItem: DispatchWorkItem?
+
     var runningCount: Int {
         sessions.filter { $0.status == .running }.count
     }
@@ -117,9 +120,24 @@ final class SessionObserver: ObservableObject {
         dispatchSource?.cancel()
     }
 
+    // MARK: - Debounced Load
+
+    /// Schedule a debounced session load (100ms delay)
+    private func scheduleLoadSessions() {
+        loadDebounceWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.loadSessions()
+        }
+        loadDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+    }
+
     // MARK: - File Reading
 
     private func loadSessions() {
+        // Invalidate TmuxHelper cache when session file changes
+        TmuxHelper.invalidatePaneInfoCache()
+
         guard FileManager.default.fileExists(atPath: storeFile.path) else {
             sessions = []
             previousSessionIds = []
@@ -339,7 +357,7 @@ final class SessionObserver: ObservableObject {
 
         source.setEventHandler { [weak self] in
             Task { @MainActor in
-                self?.loadSessions()
+                self?.scheduleLoadSessions()
             }
         }
 
