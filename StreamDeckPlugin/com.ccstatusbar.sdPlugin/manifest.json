@@ -1,0 +1,128 @@
+{
+  "UUID": "com.ccstatusbar",
+  "Name": "CC Status Bar",
+  "Version": "1.0.0.0",
+  "Author": "CC Status Bar",
+  "Description": "Control Claude Code sessions from Stream Deck",
+  "Category": "CC Status Bar",
+  "CategoryIcon": "imgs/plugin-icon",
+  "Icon": "imgs/plugin-icon",
+  "URL": "https://github.com/usedhonda/cc-status-bar",
+  "CodePath": "bin/plugin.js",
+  "PropertyInspectorPath": "ui/settings.html",
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "6.4"
+  },
+  "SDKVersion": 2,
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Actions": [
+    {
+      "UUID": "com.ccstatusbar.session",
+      "Name": "Session",
+      "Icon": "imgs/action-icons/session",
+      "Tooltip": "Show and focus a Claude Code session",
+      "PropertyInspectorPath": "ui/session-settings.html",
+      "States": [
+        {
+          "Image": "imgs/action-icons/session-empty",
+          "TitleAlignment": "middle",
+          "FontSize": 10
+        }
+      ],
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.ccstatusbar.scroll-up",
+      "Name": "Up Arrow",
+      "Icon": "imgs/action-icons/scroll-up",
+      "Tooltip": "Send Up Arrow key",
+      "States": [
+        {
+          "Image": "imgs/action-icons/scroll-up"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.scroll-down",
+      "Name": "Down Arrow",
+      "Icon": "imgs/action-icons/scroll-down",
+      "Tooltip": "Send Down Arrow key",
+      "States": [
+        {
+          "Image": "imgs/action-icons/scroll-down"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.dictation",
+      "Name": "Dictation",
+      "Icon": "imgs/action-icons/dictation",
+      "Tooltip": "Toggle Mac dictation (Fn Fn)",
+      "States": [
+        {
+          "Image": "imgs/action-icons/dictation"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.enter",
+      "Name": "Enter",
+      "Icon": "imgs/action-icons/enter",
+      "Tooltip": "Send Enter key to focused application",
+      "States": [
+        {
+          "Image": "imgs/action-icons/enter"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.escape",
+      "Name": "Escape",
+      "Icon": "imgs/action-icons/escape",
+      "Tooltip": "Send Escape key to focused application",
+      "States": [
+        {
+          "Image": "imgs/action-icons/escape"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.shift-tab",
+      "Name": "Shift+Tab",
+      "Icon": "imgs/action-icons/shift-tab",
+      "Tooltip": "Send Shift+Tab (toggle plan mode)",
+      "States": [
+        {
+          "Image": "imgs/action-icons/shift-tab"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.focus-waiting",
+      "Name": "Focus Waiting",
+      "Icon": "imgs/action-icons/focus-waiting",
+      "Tooltip": "Focus the first waiting session",
+      "States": [
+        {
+          "Image": "imgs/action-icons/focus-waiting"
+        }
+      ],
+      "SupportedInMultiActions": true
+    }
+  ]
+}

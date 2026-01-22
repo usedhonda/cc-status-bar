@@ -1,0 +1,19 @@
+{
+  "name": "cc-status-bar-streamdeck",
+  "version": "1.0.0",
+  "description": "CC Status Bar - Stream Deck Plugin",
+  "main": "bin/plugin.js",
+  "scripts": {
+    "build": "tsc",
+    "install-plugin": "streamdeck link .",
+    "dev": "npm run build && npm run install-plugin"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.2"
+  }
+}

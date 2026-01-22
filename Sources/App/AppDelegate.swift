@@ -19,10 +19,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DebugLog.log("[AppDelegate] applicationDidFinishLaunching started")
+
         // Exit if another instance is already running (first one wins)
         if exitIfOtherInstanceRunning() {
+            DebugLog.log("[AppDelegate] Exiting due to duplicate instance")
             return
         }
+        DebugLog.log("[AppDelegate] No duplicate found, continuing")
         updateSymlinkToSelf()
 
         // Run setup check (handles first run, app move, repair)
@@ -34,10 +38,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Initialize session observer
+        DebugLog.log("[AppDelegate] Creating SessionObserver")
         sessionObserver = SessionObserver()
 
         // Create status item
+        DebugLog.log("[AppDelegate] Creating statusItem")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        DebugLog.log("[AppDelegate] statusItem created: \(statusItem != nil)")
 
         // Subscribe to session changes (debounced menu rebuild)
         sessionObserver.$sessions
@@ -834,47 +841,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Exit if another CCStatusBar instance is already running (first one wins)
     /// Returns true if exiting (caller should return early)
     private func exitIfOtherInstanceRunning() -> Bool {
-        let myPid = ProcessInfo.processInfo.processIdentifier
-
-        // Use pgrep to find all CCStatusBar processes (exact match)
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        task.arguments = ["-x", "CCStatusBar"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            DebugLog.log("[AppDelegate] Failed to run pgrep: \(error)")
+        // Use NSWorkspace for safe, non-blocking duplicate detection
+        guard let myBundleID = Bundle.main.bundleIdentifier else {
+            DebugLog.log("[AppDelegate] exitIfOtherInstanceRunning - no bundle ID, skipping")
             return false
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        let pids = output.split(separator: "\n").compactMap { Int32($0) }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let runningApps = NSWorkspace.shared.runningApplications
 
-        // Filter out self
-        let otherPids = pids.filter { $0 != myPid }
-
-        if !otherPids.isEmpty {
-            // Another instance is already running - show alert and terminate self
-            DebugLog.log("[AppDelegate] Another instance already running (PID \(otherPids)), terminating self")
-
-            let alert = NSAlert()
-            alert.messageText = "CCStatusBar is already running"
-            alert.informativeText = "Another instance of CCStatusBar is already active in the menu bar."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-
-            NSApp.terminate(nil)
-            return true
+        // Check for other instances with same bundle ID
+        for app in runningApps {
+            if app.bundleIdentifier == myBundleID && app.processIdentifier != myPID {
+                DebugLog.log("[AppDelegate] Found duplicate: PID \(app.processIdentifier)")
+                let alert = NSAlert()
+                alert.messageText = "CC Status Bar is already running"
+                alert.informativeText = "Another instance of CC Status Bar is already running. This instance will exit."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                NSApp.terminate(nil)
+                return true
+            }
         }
 
+        DebugLog.log("[AppDelegate] No duplicate found (my PID: \(myPID))")
         return false
     }
 

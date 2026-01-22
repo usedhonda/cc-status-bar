@@ -67,6 +67,41 @@ final class IconManager {
         }
     }
 
+    /// Get icon as base64 PNG data for Stream Deck
+    /// - Parameters:
+    ///   - env: Focus environment
+    ///   - size: Icon size (default 40x40)
+    /// - Returns: Base64 encoded PNG string or nil
+    func iconBase64(for env: FocusEnvironment, size: CGFloat = 40) -> String? {
+        guard let image = icon(for: env, size: size) else { return nil }
+
+        // Create a single bitmap at the specified size (avoid multi-resolution TIFF)
+        let intSize = Int(size)
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: intSize,
+            pixelsHigh: intSize,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        let rect = NSRect(x: 0, y: 0, width: size, height: size)
+        image.draw(in: rect)
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return pngData.base64EncodedString()
+    }
+
     /// Get icon with tab number badge for a FocusEnvironment
     /// - Parameters:
     ///   - env: Focus environment
@@ -86,8 +121,8 @@ final class IconManager {
             return baseIcon
         }
 
-        // 1-based display (tab 0 -> display "1")
-        let badgeText = "\(tabIndex + 1)"
+        // 1-based display (tab 0 -> display "⌘1")
+        let badgeText = "⌘\(tabIndex + 1)"
 
         // Create new image with badge
         let newImage = NSImage(size: baseIcon.size)
@@ -98,14 +133,12 @@ final class IconManager {
 
         // Badge configuration (bottom-right, rounded rectangle)
         let badgeHeight = size * 0.32
-        let badgeWidth = badgeHeight * 0.85
-        let cornerRadius = badgeHeight * 0.2
-        let margin = size * 0.02  // Small margin from edge
-
+        let badgeWidth = badgeHeight * 1.65  // Wider for ⌘ symbol
+        let cornerRadius = badgeHeight * 0.35
         // Position at bottom-right
         let badgeRect = NSRect(
-            x: size - badgeWidth - margin,
-            y: margin,
+            x: size - badgeWidth,
+            y: 0,
             width: badgeWidth,
             height: badgeHeight
         )
@@ -119,7 +152,7 @@ final class IconManager {
         badgePath.stroke()
 
         // Draw badge text
-        let fontSize = badgeHeight * 0.65
+        let fontSize = badgeHeight * 0.88
         let font = NSFont.boldSystemFont(ofSize: fontSize)
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
