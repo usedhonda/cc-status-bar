@@ -1,0 +1,120 @@
+{
+  "Name": "CC Status Bar",
+  "Version": "1.0.0",
+  "Author": "CC Status Bar",
+  "Description": "Control Claude Code sessions from Stream Deck",
+  "Category": "Developer Tools",
+  "CategoryIcon": "imgs/plugin-icon",
+  "Icon": "imgs/plugin-icon",
+  "URL": "https://github.com/example/cc-status-bar",
+  "CodePath": "bin/plugin.js",
+  "PropertyInspectorPath": "ui/settings.html",
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "6.0"
+  },
+  "SDKVersion": 2,
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Actions": [
+    {
+      "UUID": "com.ccstatusbar.session",
+      "Name": "Session",
+      "Icon": "imgs/action-icons/session",
+      "Tooltip": "Show and focus a Claude Code session",
+      "PropertyInspectorPath": "ui/session-settings.html",
+      "States": [
+        {
+          "Image": "imgs/action-icons/session-empty",
+          "TitleAlignment": "middle",
+          "FontSize": "10"
+        }
+      ],
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.ccstatusbar.scroll-up",
+      "Name": "Up Arrow",
+      "Icon": "imgs/action-icons/scroll-up",
+      "Tooltip": "Send Up Arrow key",
+      "States": [
+        {
+          "Image": "imgs/action-icons/scroll-up"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.scroll-down",
+      "Name": "Down Arrow",
+      "Icon": "imgs/action-icons/scroll-down",
+      "Tooltip": "Send Down Arrow key",
+      "States": [
+        {
+          "Image": "imgs/action-icons/scroll-down"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.dictation",
+      "Name": "Dictation",
+      "Icon": "imgs/action-icons/dictation",
+      "Tooltip": "Toggle Mac dictation (Fn Fn)",
+      "States": [
+        {
+          "Image": "imgs/action-icons/dictation"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.enter",
+      "Name": "Enter",
+      "Icon": "imgs/action-icons/enter",
+      "Tooltip": "Send Enter key to focused application",
+      "States": [
+        {
+          "Image": "imgs/action-icons/enter"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.escape",
+      "Name": "Escape",
+      "Icon": "imgs/action-icons/escape",
+      "Tooltip": "Send Escape key to focused application",
+      "States": [
+        {
+          "Image": "imgs/action-icons/escape"
+        }
+      ],
+      "SupportedInMultiActions": true
+    }
+  ],
+  "Profiles": [
+    {
+      "DeviceType": 0,
+      "Name": "profiles/CCStatusBar Standard",
+      "DontAutoSwitchWhenInstalled": true
+    },
+    {
+      "DeviceType": 1,
+      "Name": "profiles/CCStatusBar Mini",
+      "DontAutoSwitchWhenInstalled": true
+    },
+    {
+      "DeviceType": 2,
+      "Name": "profiles/CCStatusBar XL",
+      "DontAutoSwitchWhenInstalled": true
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Session Settings</title>
+    <link rel="stylesheet" href="https://developer.elgato.com/documentation/sdk/css/sdpi.css">
+    <style>
+        .sdpi-item-value {
+            flex: 1;
+        }
+        .info-text {
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+        .status-legend {
+            margin-top: 12px;
+            padding: 8px;
+            background-color: #2c2c2c;
+            border-radius: 4px;
+        }
+        .status-legend ul {
+            margin: 4px 0;
+            padding-left: 16px;
+            font-size: 11px;
+            color: #999;
+        }
+        .status-legend li {
+            margin: 4px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="sdpi-wrapper">
+        <div class="sdpi-item">
+            <div class="sdpi-item-label">Session</div>
+            <select class="sdpi-item-value select" id="sessionNumber">
+                <option value="auto">Auto (dynamic)</option>
+                <option value="1">Session 1</option>
+                <option value="2">Session 2</option>
+                <option value="3">Session 3</option>
+                <option value="4">Session 4</option>
+                <option value="5">Session 5</option>
+                <option value="6">Session 6</option>
+                <option value="7">Session 7</option>
+                <option value="8">Session 8</option>
+                <option value="9">Session 9</option>
+                <option value="10">Session 10</option>
+            </select>
+        </div>
+
+        <div class="info-text">
+            <strong>Auto:</strong> Assigns session based on button position.<br>
+            <strong>Fixed:</strong> Always shows the specified session number.
+        </div>
+
+        <div class="status-legend">
+            <strong style="color: #fff; font-size: 12px;">Status Colors</strong>
+            <ul>
+                <li><span style="color: #34C759;">●</span> Green - Running</li>
+                <li><span style="color: #FFCC00;">●</span> Yellow - Waiting for input</li>
+                <li><span style="color: #FF3B30;">●</span> Red - Permission prompt</li>
+                <li><span style="color: #8E8E93;">●</span> Gray - Stopped</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let uuid = null;
+        let actionInfo = null;
+
+        function connectElgatoStreamDeckSocket(inPort, inPropertyInspectorUUID, inRegisterEvent, inInfo, inActionInfo) {
+            uuid = inPropertyInspectorUUID;
+            actionInfo = JSON.parse(inActionInfo);
+
+            websocket = new WebSocket('ws://127.0.0.1:' + inPort);
+
+            websocket.onopen = function() {
+                websocket.send(JSON.stringify({
+                    event: inRegisterEvent,
+                    uuid: inPropertyInspectorUUID
+                }));
+
+                // Load existing settings
+                const settings = actionInfo.payload.settings || {};
+                const sessionNumber = settings.sessionNumber || 'auto';
+                document.getElementById('sessionNumber').value = sessionNumber;
+            };
+
+            websocket.onmessage = function(evt) {
+                const data = JSON.parse(evt.data);
+                if (data.event === 'didReceiveSettings') {
+                    const settings = data.payload.settings || {};
+                    document.getElementById('sessionNumber').value = settings.sessionNumber || 'auto';
+                }
+            };
+        }
+
+        // Save settings when changed
+        document.getElementById('sessionNumber').addEventListener('change', function() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const payload = {
+                    event: 'setSettings',
+                    context: uuid,
+                    payload: {
+                        sessionNumber: this.value
+                    }
+                };
+                websocket.send(JSON.stringify(payload));
+            }
+        });
+    </script>
+</body>
+</html>

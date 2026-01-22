@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CC Status Bar Settings</title>
+    <link rel="stylesheet" href="https://developer.elgato.com/documentation/sdk/css/sdpi.css">
+    <style>
+        .info-box {
+            background-color: #2c2c2c;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 12px 0;
+        }
+        .info-box h3 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            color: #ffffff;
+        }
+        .info-box p {
+            margin: 0;
+            font-size: 11px;
+            color: #999999;
+            line-height: 1.4;
+        }
+        .layout-diagram {
+            font-family: monospace;
+            font-size: 10px;
+            white-space: pre;
+            background-color: #1c1c1e;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sdpi-wrapper">
+        <div class="info-box">
+            <h3>CC Status Bar for Stream Deck</h3>
+            <p>
+                This plugin displays your Claude Code sessions on Stream Deck buttons.
+                Sessions are color-coded by status:
+            </p>
+            <ul style="margin: 8px 0; padding-left: 20px; font-size: 11px; color: #999;">
+                <li><span style="color: #34C759;">Green</span> - Running / Acknowledged</li>
+                <li><span style="color: #FFCC00;">Yellow</span> - Waiting for input</li>
+                <li><span style="color: #FF3B30;">Red</span> - Permission prompt</li>
+                <li><span style="color: #8E8E93;">Gray</span> - Stopped</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <h3>Recommended Layout</h3>
+            <p>For a 15-button Stream Deck:</p>
+            <div class="layout-diagram">
++-----+-----+-----+-----+-----+
+|  1  |  2  |  3  |  4  |  ^  |  Sessions 1-4 + Up
++-----+-----+-----+-----+-----+
+|  5  |  6  |  7  |  8  |  v  |  Sessions 5-8 + Down
++-----+-----+-----+-----+-----+
+|  9  | 10  | ESC | Mic | Ent |  Sessions 9-10 + Controls
++-----+-----+-----+-----+-----+
+            </div>
+        </div>
+
+        <div class="info-box">
+            <h3>Control Buttons</h3>
+            <p>
+                <strong>Up/Down Arrow:</strong> Send arrow keys to focused app.<br>
+                <strong>Escape:</strong> Send Escape key to focused app.<br>
+                <strong>Dictation:</strong> Toggle Mac dictation (via Edit menu).<br>
+                <strong>Enter:</strong> Send Enter key to focused application.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function connectElgatoStreamDeckSocket(inPort, inPropertyInspectorUUID, inRegisterEvent, inInfo, inActionInfo) {
+            const websocket = new WebSocket('ws://127.0.0.1:' + inPort);
+            websocket.onopen = function() {
+                websocket.send(JSON.stringify({
+                    event: inRegisterEvent,
+                    uuid: inPropertyInspectorUUID
+                }));
+            };
+        }
+    </script>
+</body>
+</html>
