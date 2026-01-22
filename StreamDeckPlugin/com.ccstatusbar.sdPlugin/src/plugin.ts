@@ -532,13 +532,20 @@ function createSessionButtonSVG(projectName: string, bgColor: string, buttonInde
     const totalTextHeight = lines.length * lineHeight;
     const startY = 36 - (totalTextHeight / 2) + (lineHeight / 2) + 4; // +4 for session number offset
 
-    const textElements = lines.map((line, i) =>
-        `<text x="36" y="${startY + i * lineHeight}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
-    ).join('\n');
+    // Add shadow for white text (not needed for black text on yellow)
+    const needsShadow = textColor === '#FFFFFF';
+    const textElements = lines.map((line, i) => {
+        const y = startY + i * lineHeight;
+        const shadow = needsShadow
+            ? `<text x="38" y="${y + 2}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="#000000" opacity="0.6" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
+            : '';
+        const main = `<text x="36" y="${y}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`;
+        return shadow + main;
+    }).join('\n');
 
-    // Terminal/editor icon as background (40x40, centered, semi-transparent)
+    // Terminal/editor icon (72x72, full size)
     const iconElement = iconBase64
-        ? `<image x="16" y="16" width="40" height="40" opacity="0.35" href="data:image/png;base64,${iconBase64}"/>`
+        ? `<image x="0" y="0" width="72" height="72" opacity="0.4" href="data:image/png;base64,${iconBase64}"/>`
         : '';
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="72" height="72" viewBox="0 0 72 72">

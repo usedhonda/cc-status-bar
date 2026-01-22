@@ -112,6 +112,20 @@ pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
 3. **NEVER end task** after build only - deploy is part of implementation
 4. **Test immediately** after restart if possible
 
+### ⚠️ CRITICAL: Restart Method
+
+**NEVER kill plugin processes directly.** Always restart the Stream Deck app instead.
+
+```bash
+# ✅ CORRECT: Restart app only (app auto-restarts all plugins)
+pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
+
+# ❌ WRONG: Kills ALL plugins including volume-controller, causing audio issues
+pkill -f "sdPlugin"
+```
+
+Killing plugin processes directly breaks other plugins (volume-controller, etc.) and causes system instability.
+
 ## Data Source
 
 Monitors `~/Library/Application Support/CCStatusBar/sessions.json`
