@@ -75,13 +75,42 @@ open CCStatusBar.app
 
 ### Post-Build Checklist (MANDATORY)
 
-TodoWriteでは以下を**別項目**として管理すること：
+Track these as **separate items** in TodoWrite:
 
-1. `swift build` - ビルド
-2. `pkill + cp + codesign + open` - 再起動
-3. `tail ~/Library/Logs/CCStatusBar/debug.log` - ログ確認
+1. `swift build` - Build
+2. `pkill + cp + codesign + open` - Restart app
+3. `tail ~/Library/Logs/CCStatusBar/debug.log` - Check logs
 
-**ビルド成功で終わりにしない。再起動してログ確認するまでが実装。**
+**Build success is not completion. Restart and verify logs before marking done.**
+
+## Stream Deck Plugin Build & Deploy (MANDATORY)
+
+**Full specification**: See [docs/STREAMDECK.md](docs/STREAMDECK.md) for detailed plugin spec, troubleshooting, and development notes.
+
+### Build Command
+
+```bash
+cd StreamDeckPlugin/cc-status-bar.sdPlugin
+npx tsc src/plugin.ts --outDir bin --target ES2020 --module CommonJS --esModuleInterop
+```
+
+### Deploy & Restart (Claude MUST do this)
+
+```bash
+# Copy built plugin to installed location
+cp StreamDeckPlugin/cc-status-bar.sdPlugin/bin/plugin.js \
+   ~/Library/Application\ Support/com.elgato.StreamDeck/Plugins/cc-status-bar.sdPlugin/bin/
+
+# Restart Stream Deck app
+pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
+```
+
+### Rules
+
+1. **Claude MUST complete full cycle**: Build → Copy → Restart
+2. **NEVER ask user** to restart Stream Deck or copy files
+3. **NEVER end task** after build only - deploy is part of implementation
+4. **Test immediately** after restart if possible
 
 ## Data Source
 
@@ -165,19 +194,28 @@ Release procedure is documented in `.local/release.md` (local only, not committe
 
 ## Pre-commit/Pre-push Check (MANDATORY)
 
-コミットやプッシュを行う前に、**必ず `/publish-check` スキルを実行すること**。
+Before commit or push, **always run `/publish-check` skill**.
 
-| 操作 | トリガーワード |
-|------|---------------|
+| Operation | Trigger Words |
+|-----------|---------------|
 | git commit | コミット, commit |
 | git push | プッシュ, push, 上げて, あげて |
 | release | リリース, release, deploy, デプロイ |
 
-**禁止**: `/publish-check` を実行せずにコミット/プッシュを行うこと
+**Prohibited**: Committing or pushing without running `/publish-check`
 
 ---
 
 ## Git Commit
+
+### Commit Frequency (MANDATORY)
+
+**Commit frequently, even on feature branches.**
+
+- Commit at every logical checkpoint
+- Break large changes into small commits
+- Commit immediately when code reaches a working state
+- Push can wait, but commit must happen
 
 ### Pre-commit Check (Required)
 
