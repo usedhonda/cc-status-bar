@@ -49,7 +49,9 @@ const Actions = {
     SCROLL_DOWN: 'com.ccstatusbar.scroll-down',
     DICTATION: 'com.ccstatusbar.dictation',
     ENTER: 'com.ccstatusbar.enter',
-    ESCAPE: 'com.ccstatusbar.escape'
+    ESCAPE: 'com.ccstatusbar.escape',
+    SHIFT_TAB: 'com.ccstatusbar.shift-tab',
+    FOCUS_WAITING: 'com.ccstatusbar.focus-waiting'
 } as const;
 
 // Device type to columns mapping
@@ -316,6 +318,12 @@ function handleKeyDown(action: string, context: string): void {
         case Actions.ESCAPE:
             handleEscape();
             break;
+        case Actions.SHIFT_TAB:
+            handleShiftTab();
+            break;
+        case Actions.FOCUS_WAITING:
+            handleFocusWaiting();
+            break;
     }
 }
 
@@ -327,6 +335,28 @@ function handleEscape(): void {
         if (error) {
             console.error('Escape key error:', error.message);
         }
+    });
+}
+
+/**
+ * Handle Shift+Tab key (toggle plan mode)
+ */
+function handleShiftTab(): void {
+    exec(`osascript -e 'tell application "System Events" to key code 48 using shift down'`, (error) => {
+        if (error) {
+            console.error('Shift+Tab error:', error.message);
+        }
+    });
+}
+
+/**
+ * Handle focus waiting session (same as global hotkey)
+ * Simulates Cmd+Ctrl+C to trigger the app's handleHotkeyPressed
+ */
+function handleFocusWaiting(): void {
+    // Simulate the global hotkey (Cmd+Ctrl+C) to use app's unified logic
+    exec(`osascript -e 'tell application "System Events" to key code 8 using {command down, control down}'`, (error) => {
+        if (error) console.error('Hotkey simulation error:', error.message);
     });
 }
 
