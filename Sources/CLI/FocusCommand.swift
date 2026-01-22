@@ -13,12 +13,16 @@ struct FocusCommand: ParsableCommand {
     @Option(name: .long, help: "Session ID (e.g., 'abc123:/dev/ttys001')")
     var id: String?
 
+    @Flag(name: .long, help: "Focus the first waiting session (red priority, then yellow)")
+    var waiting: Bool = false
+
     func validate() throws {
-        if index == nil && id == nil {
-            throw ValidationError("Either --index or --id must be specified")
+        let optionCount = [index != nil, id != nil, waiting].filter { $0 }.count
+        if optionCount == 0 {
+            throw ValidationError("Either --index, --id, or --waiting must be specified")
         }
-        if index != nil && id != nil {
-            throw ValidationError("Cannot specify both --index and --id")
+        if optionCount > 1 {
+            throw ValidationError("Cannot specify multiple options")
         }
     }
 
@@ -32,7 +36,18 @@ struct FocusCommand: ParsableCommand {
 
         let session: Session?
 
-        if let index = index {
+        if waiting {
+            // Focus first waiting session: red (permission_prompt) priority, then yellow
+            let waitingSessions = sessions.filter { $0.status == .waitingInput }
+            let redSessions = waitingSessions.filter { $0.waitingReason == .permissionPrompt }
+            let yellowSessions = waitingSessions.filter { $0.waitingReason != .permissionPrompt }
+
+            session = redSessions.first ?? yellowSessions.first
+            if session == nil {
+                printError("No waiting sessions")
+                return
+            }
+        } else if let index = index {
             guard index >= 0 && index < sessions.count else {
                 printError("Index \(index) out of range (0-\(sessions.count - 1))")
                 return

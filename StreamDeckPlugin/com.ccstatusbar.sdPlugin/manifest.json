@@ -99,6 +99,30 @@
         }
       ],
       "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.shift-tab",
+      "Name": "Shift+Tab",
+      "Icon": "imgs/action-icons/shift-tab",
+      "Tooltip": "Send Shift+Tab (toggle plan mode)",
+      "States": [
+        {
+          "Image": "imgs/action-icons/shift-tab"
+        }
+      ],
+      "SupportedInMultiActions": true
+    },
+    {
+      "UUID": "com.ccstatusbar.focus-waiting",
+      "Name": "Focus Waiting",
+      "Icon": "imgs/action-icons/focus-waiting",
+      "Tooltip": "Focus the first waiting session",
+      "States": [
+        {
+          "Image": "imgs/action-icons/focus-waiting"
+        }
+      ],
+      "SupportedInMultiActions": true
     }
   ]
 }

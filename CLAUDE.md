@@ -114,15 +114,20 @@ pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
 
 ### ⚠️ CRITICAL: Restart Method
 
-**NEVER kill plugin processes directly.** Always restart the Stream Deck app instead.
+**NEVER kill plugin processes directly.** Always use the restart script:
 
 ```bash
-# ✅ CORRECT: Restart app only (app auto-restarts all plugins)
-pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
+# ✅ CORRECT: Use the safe restart script
+./scripts/restart-streamdeck.sh
 
-# ❌ WRONG: Kills ALL plugins including volume-controller, causing audio issues
+# ❌ WRONG: These kill ALL plugins including volume-controller
 pkill -f "sdPlugin"
+pkill -f "Stream Deck"
+pgrep -f "Stream Deck"
+kill -9 $(pgrep -f "Stream Deck")
 ```
+
+The script uses `pkill -x "Elgato Stream Deck"` which only kills the app process, not plugins.
 
 Killing plugin processes directly breaks other plugins (volume-controller, etc.) and causes system instability.
 
