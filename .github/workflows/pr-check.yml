@@ -1,0 +1,43 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+  docs-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if source changed but docs didn't
+        run: |
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD)
+
+          # Check if source files changed
+          SOURCE_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(swift|ts)$' || true)
+
+          # Check if docs changed
+          DOCS_CHANGED=$(echo "$CHANGED_FILES" | grep -E '(README|SPEC)\.md$' || true)
+
+          if [ -n "$SOURCE_CHANGED" ] && [ -z "$DOCS_CHANGED" ]; then
+            echo "::warning::Source files changed but documentation (README.md, SPEC.md) may need update"
+            echo ""
+            echo "Changed source files:"
+            echo "$SOURCE_CHANGED"
+          else
+            echo "Documentation check passed"
+          fi

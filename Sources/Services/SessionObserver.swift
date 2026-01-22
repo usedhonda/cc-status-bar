@@ -11,7 +11,6 @@ final class SessionObserver: ObservableObject {
     private var dispatchSource: DispatchSourceFileSystemObject?
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
     private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
-    private var acknowledgedSessionIds: Set<String> = []  // Sessions user has seen (for yellow->green)
     private var isInitialLoad = true  // Skip notifications on first load to avoid spam at startup
 
     /// Debounce work item for file watch events
@@ -28,7 +27,7 @@ final class SessionObserver: ObservableObject {
     /// Waiting sessions that haven't been acknowledged (for menu bar count)
     var unacknowledgedWaitingCount: Int {
         sessions.filter {
-            $0.status == .waitingInput && !acknowledgedSessionIds.contains($0.id)
+            $0.status == .waitingInput && $0.isAcknowledged != true
         }.count
     }
 
@@ -37,7 +36,7 @@ final class SessionObserver: ObservableObject {
         sessions.filter {
             $0.status == .waitingInput &&
             $0.waitingReason == .permissionPrompt &&
-            !acknowledgedSessionIds.contains($0.id)
+            $0.isAcknowledged != true
         }.count
     }
 
@@ -46,7 +45,7 @@ final class SessionObserver: ObservableObject {
         sessions.filter {
             $0.status == .waitingInput &&
             $0.waitingReason != .permissionPrompt &&
-            !acknowledgedSessionIds.contains($0.id)
+            $0.isAcknowledged != true
         }.count
     }
 
@@ -54,7 +53,7 @@ final class SessionObserver: ObservableObject {
     var displayedGreenCount: Int {
         let running = sessions.filter { $0.status == .running }.count
         let acknowledgedWaiting = sessions.filter {
-            $0.status == .waitingInput && acknowledgedSessionIds.contains($0.id)
+            $0.status == .waitingInput && $0.isAcknowledged == true
         }.count
         return running + acknowledgedWaiting
     }
@@ -72,14 +71,16 @@ final class SessionObserver: ObservableObject {
 
     /// Mark a session as acknowledged (user has seen it)
     func acknowledge(sessionId: String) {
-        acknowledgedSessionIds.insert(sessionId)
-        objectWillChange.send()
-        DebugLog.log("[SessionObserver] Acknowledged session: \(sessionId)")
+        // Find the session to get its TTY
+        guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
+        SessionStore.shared.acknowledgeSession(sessionId: session.sessionId, tty: session.tty)
+        // Trigger reload to pick up the change
+        loadSessions()
     }
 
     /// Check if a session is acknowledged
     func isAcknowledged(sessionId: String) -> Bool {
-        acknowledgedSessionIds.contains(sessionId)
+        sessions.first { $0.id == sessionId }?.isAcknowledged == true
     }
 
     /// Find session by TTY
@@ -226,14 +227,14 @@ final class SessionObserver: ObservableObject {
 
     /// Clear acknowledged flag and notification cooldown when sessions return to running
     private func cleanupAcknowledgedSessions(_ loadedSessions: [Session]) {
-        let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
-        let cleared = acknowledgedSessionIds.intersection(runningIds)
-        if !cleared.isEmpty {
-            acknowledgedSessionIds.subtract(runningIds)
-            DebugLog.log("[SessionObserver] Cleared acknowledged for running sessions: \(cleared)")
+        // Find sessions that are running but still have isAcknowledged=true
+        let runningSessions = loadedSessions.filter { $0.status == .running && $0.isAcknowledged == true }
+        for session in runningSessions {
+            SessionStore.shared.clearAcknowledged(sessionId: session.sessionId, tty: session.tty)
         }
 
         // Clear notification cooldowns for sessions that returned to running
+        let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
         for sessionId in runningIds {
             NotificationManager.shared.clearCooldown(sessionId: sessionId)
         }

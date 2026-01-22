@@ -133,6 +133,22 @@ codesign --force --deep --sign - CCStatusBar.app
 open CCStatusBar.app
 ```
 
+### Stream Deck Plugin (Optional)
+
+If you have an Elgato Stream Deck, install the included plugin:
+
+1. Double-click `CC Status Bar.streamDeckPlugin` in the DMG
+2. Stream Deck app will open and install the plugin automatically
+
+**Available Actions:**
+| Action | Function |
+|--------|----------|
+| Session | Display and focus Claude Code sessions |
+| Up/Down Arrow | Send arrow keys (for prompt selection) |
+| Enter | Send Enter key |
+| Escape | Send Escape key |
+| Dictation | Toggle macOS dictation |
+
 ## Permissions
 
 - **Accessibility**: Required for terminal tab switching (Ghostty)
