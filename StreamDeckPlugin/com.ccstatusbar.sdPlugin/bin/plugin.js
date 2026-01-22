@@ -160,7 +160,7 @@ function handleDidReceiveSettings(action, context, payload) {
         const buttonInfo = sessionButtons.get(context);
         if (buttonInfo) {
             buttonInfo.sessionNumber = payload.settings?.sessionNumber || 'auto';
-            updateSessionButton(context, buttonInfo);
+            updateAllSessionButtons(); // Recalculate all AUTO ranks
         }
     }
 }
@@ -184,7 +184,7 @@ function handleWillAppear(action, context, payload, deviceId) {
             sessionNumber
         };
         sessionButtons.set(context, buttonInfo);
-        updateSessionButton(context, buttonInfo);
+        updateAllSessionButtons(); // Recalculate all AUTO ranks
     }
 }
 /**
@@ -274,7 +274,8 @@ function handleSessionClick(context) {
         sessionIndex = parseInt(buttonInfo.sessionNumber, 10) - 1;
     }
     else {
-        sessionIndex = currentOffset + buttonInfo.buttonIndex;
+        const autoRank = buildAutoRank();
+        sessionIndex = currentOffset + (autoRank.get(context) ?? 0);
     }
     if (sessionIndex < 0 || sessionIndex >= sessions.length)
         return;
@@ -366,27 +367,46 @@ function fetchSessions() {
     }
 }
 /**
+ * Build auto-rank table: assigns sequential indices to AUTO mode buttons
+ * sorted by device → row → col (deterministic ordering)
+ */
+function buildAutoRank() {
+    const autoButtons = Array.from(sessionButtons.entries())
+        .filter(([_, info]) => !info.sessionNumber || info.sessionNumber === 'auto');
+    // Sort by device → row → col (deterministic)
+    autoButtons.sort((a, b) => {
+        const infoA = a[1], infoB = b[1];
+        if (infoA.deviceId !== infoB.deviceId) {
+            return (infoA.deviceId || '').localeCompare(infoB.deviceId || '');
+        }
+        if (infoA.row !== infoB.row)
+            return infoA.row - infoB.row;
+        return infoA.col - infoB.col;
+    });
+    const rank = new Map();
+    autoButtons.forEach(([context], i) => rank.set(context, i));
+    return rank;
+}
+/**
  * Update all session buttons
  */
 function updateAllSessionButtons() {
+    const autoRank = buildAutoRank();
     for (const [context, buttonInfo] of sessionButtons) {
-        updateSessionButton(context, buttonInfo);
+        let sessionIndex;
+        if (buttonInfo.sessionNumber && buttonInfo.sessionNumber !== 'auto') {
+            sessionIndex = parseInt(buttonInfo.sessionNumber, 10) - 1;
+        }
+        else {
+            sessionIndex = currentOffset + (autoRank.get(context) ?? 0);
+        }
+        updateSessionButtonWithIndex(context, buttonInfo, sessionIndex);
     }
 }
 /**
- * Update a single session button
+ * Update a single session button with a pre-calculated session index
  */
-function updateSessionButton(context, buttonInfo) {
-    // Determine session index based on settings
-    let sessionIndex;
-    if (buttonInfo.sessionNumber && buttonInfo.sessionNumber !== 'auto') {
-        // Fixed session number (1-based, convert to 0-based)
-        sessionIndex = parseInt(buttonInfo.sessionNumber, 10) - 1;
-    }
-    else {
-        // Auto: use button position with current offset
-        sessionIndex = currentOffset + buttonInfo.buttonIndex;
-    }
+function updateSessionButtonWithIndex(context, buttonInfo, sessionIndex) {
     const session = sessions[sessionIndex];
     if (!session) {
         setImage(context, createEmptyButtonSVG());
@@ -407,14 +427,15 @@ function updateSessionButton(context, buttonInfo) {
     else {
         bgColor = '#8E8E93'; // Gray
     }
-    const svg = createSessionButtonSVG(session.project, bgColor, buttonInfo.buttonIndex, session.icon_base64);
+    const svg = createSessionButtonSVG(session.project, bgColor, sessionIndex, session.icon_base64);
     setImage(context, svg);
 }
 /**
  * Create SVG for session button (72x72, max 3 lines, vertically centered)
  * Layers: background color → terminal/editor icon → project name
+ * @param sessionIndex 0-based session index (already includes offset for AUTO mode)
  */
-function createSessionButtonSVG(projectName, bgColor, buttonIndex = 0, iconBase64) {
+function createSessionButtonSVG(projectName, bgColor, sessionIndex = 0, iconBase64) {
     const textColor = bgColor === '#FFCC00' ? '#000000' : '#FFFFFF';
     const maxCharsPerLine = 6;
     const fontSize = 18;
@@ -444,23 +465,21 @@ function createSessionButtonSVG(projectName, bgColor, buttonIndex = 0, iconBase6
     if (remaining.length > 0 && lines.length === 3) {
         lines[2] = lines[2].substring(0, maxCharsPerLine - 1) + '…';
     }
-    const sessionNum = currentOffset + buttonIndex + 1;
+    const sessionNum = sessionIndex + 1;
     // Calculate vertical center (36 is center of 72px canvas)
     const totalTextHeight = lines.length * lineHeight;
     const startY = 36 - (totalTextHeight / 2) + (lineHeight / 2) + 4; // +4 for session number offset
-    // Add shadow for white text (not needed for black text on yellow)
-    const needsShadow = textColor === '#FFFFFF';
+    // Add shadow: white text → black shadow, black text (yellow bg) → white shadow
+    const shadowColor = textColor === '#FFFFFF' ? '#000000' : '#FFFFFF';
     const textElements = lines.map((line, i) => {
         const y = startY + i * lineHeight;
-        const shadow = needsShadow
-            ? `<text x="38" y="${y + 2}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="#000000" opacity="0.6" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`
-            : '';
+        const shadow = `<text x="38" y="${y + 2}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="${shadowColor}" opacity="0.6" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`;
         const main = `<text x="36" y="${y}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`;
         return shadow + main;
     }).join('\n');
     // Terminal/editor icon (72x72, full size)
     const iconElement = iconBase64
-        ? `<image x="0" y="0" width="72" height="72" opacity="0.4" href="data:image/png;base64,${iconBase64}"/>`
+        ? `<image x="0" y="0" width="72" height="72" opacity="0.65" href="data:image/png;base64,${iconBase64}"/>`
         : '';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="72" height="72" viewBox="0 0 72 72">
 <rect width="72" height="72" rx="8" fill="${bgColor}"/>
