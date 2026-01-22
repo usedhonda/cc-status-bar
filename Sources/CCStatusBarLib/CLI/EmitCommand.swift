@@ -2,8 +2,8 @@ import ArgumentParser
 import Foundation
 
 /// CLI command for external tools to emit CCSB Events Protocol events
-struct EmitCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct EmitCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "emit",
         abstract: "Emit a CCSB Events Protocol event",
         discussion: """
@@ -45,7 +45,9 @@ struct EmitCommand: ParsableCommand {
     @Flag(name: .long, help: "Read JSON event from stdin")
     var json: Bool = false
 
-    func run() throws {
+    public init() {}
+
+    public func run() throws {
         let ccsbEvent: CCSBEvent
 
         if json {

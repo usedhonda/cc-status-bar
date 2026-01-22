@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
@@ -18,7 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
 
     @MainActor
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    public func applicationDidFinishLaunching(_ notification: Notification) {
         DebugLog.log("[AppDelegate] applicationDidFinishLaunching started")
 
         // Exit if another instance is already running (first one wins)
@@ -272,18 +272,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - NSMenuDelegate
 
-    func menuWillOpen(_ menu: NSMenu) {
+    public func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
+    public func menuNeedsUpdate(_ menu: NSMenu) {
         // Rebuild menu with fresh attach states before display
         TmuxHelper.invalidateAttachStatesCache()
         menu.removeAllItems()
         buildMenuItems(into: menu)
     }
 
-    func menuDidClose(_ menu: NSMenu) {
+    public func menuDidClose(_ menu: NSMenu) {
         isMenuOpen = false
     }
 

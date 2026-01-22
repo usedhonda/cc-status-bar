@@ -1,8 +1,8 @@
 import ArgumentParser
 import Foundation
 
-struct HookCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct HookCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "hook",
         abstract: "Handle a hook event from Claude Code"
     )
@@ -10,7 +10,9 @@ struct HookCommand: ParsableCommand {
     @Argument(help: "The hook event name (PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit, SessionStart, SessionEnd)")
     var eventName: String
 
-    func run() throws {
+    public init() {}
+
+    public func run() throws {
         let stdinData = FileHandle.standardInput.readDataToEndOfFile()
 
         guard !stdinData.isEmpty else {

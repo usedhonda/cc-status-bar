@@ -5,14 +5,22 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Build
+  test:
+    name: Test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
-        run: swift build
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install TypeScript
+        run: npm install -g typescript
+
+      - name: Run Tests
+        run: ./scripts/test.sh
 
   docs-check:
     name: Documentation Check
