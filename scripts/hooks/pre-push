@@ -1,0 +1,15 @@
+#!/bin/bash
+# Pre-push hook - runs tests before pushing
+
+# Get the directory of the script
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+echo "Running pre-push tests..."
+echo ""
+
+# Run the test script
+"$REPO_ROOT/scripts/test.sh"
+
+# Exit with the test script's exit code
+exit $?

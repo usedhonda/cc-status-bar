@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import ArgumentParser
+import CCStatusBarLib
 
 // CLI Commands
 struct CCStatusBarCLI: ParsableCommand {

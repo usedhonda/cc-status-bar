@@ -1,8 +1,8 @@
 import ArgumentParser
 import Foundation
 
-struct ListCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct ListCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List all active sessions"
     )
@@ -16,7 +16,9 @@ struct ListCommand: ParsableCommand {
     @Option(name: .long, help: "Maximum number of sessions to return")
     var limit: Int?
 
-    func run() {
+    public init() {}
+
+    public func run() {
         let allSessions = SessionStore.shared.getSessions()
 
         if json {

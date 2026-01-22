@@ -6,8 +6,8 @@ extension NSNotification.Name {
     static let focusSession = NSNotification.Name("focusSession")
 }
 
-final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
-    static let shared = NotificationManager()
+public final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+    public static let shared = NotificationManager()
 
     // Notification action identifiers
     private static let focusActionIdentifier = "FOCUS_TERMINAL"
@@ -152,7 +152,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     // MARK: - UNUserNotificationCenterDelegate
 
     // Show notification even when app is active
-    func userNotificationCenter(
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
@@ -162,7 +162,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     // Handle notification click and action buttons
-    func userNotificationCenter(
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void

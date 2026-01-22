@@ -1,8 +1,8 @@
 import ArgumentParser
 import Foundation
 
-struct FocusCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct FocusCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "focus",
         abstract: "Focus a terminal session"
     )
@@ -16,7 +16,9 @@ struct FocusCommand: ParsableCommand {
     @Flag(name: .long, help: "Focus the first waiting session (red priority, then yellow)")
     var waiting: Bool = false
 
-    func validate() throws {
+    public init() {}
+
+    public func validate() throws {
         let optionCount = [index != nil, id != nil, waiting].filter { $0 }.count
         if optionCount == 0 {
             throw ValidationError("Either --index, --id, or --waiting must be specified")
@@ -26,7 +28,7 @@ struct FocusCommand: ParsableCommand {
         }
     }
 
-    func run() {
+    public func run() {
         let sessions = SessionStore.shared.getSessions()
 
         guard !sessions.isEmpty else {

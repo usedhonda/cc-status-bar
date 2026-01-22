@@ -8,12 +8,22 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.2.0"),
     ],
     targets: [
-        .executableTarget(
-            name: "CCStatusBar",
+        .target(
+            name: "CCStatusBarLib",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources"
+            path: "Sources/CCStatusBarLib"
+        ),
+        .executableTarget(
+            name: "CCStatusBar",
+            dependencies: ["CCStatusBarLib"],
+            path: "Sources/CCStatusBar"
+        ),
+        .testTarget(
+            name: "CCStatusBarTests",
+            dependencies: ["CCStatusBarLib"],
+            path: "Tests"
         ),
     ]
 )

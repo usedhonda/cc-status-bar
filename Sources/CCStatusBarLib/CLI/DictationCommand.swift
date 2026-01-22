@@ -22,13 +22,15 @@ import Cocoa
 /// # Related Documentation
 /// - `docs/STREAMDECK.md` - Troubleshooting section
 /// - `docs/ask/gemini/9736101c5689c45e/029-*` - AI discussion on CGEvent Fn key
-struct DictationCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct DictationCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "dictation",
         abstract: "Toggle macOS dictation (via AXStartDictation action)"
     )
 
-    func run() {
+    public init() {}
+
+    public func run() {
         // Primary: AXStartDictation accessibility action
         // Recommended by Gemini as "bulletproof" solution for Sequoia
         if toggleDictationWithAXAction() {

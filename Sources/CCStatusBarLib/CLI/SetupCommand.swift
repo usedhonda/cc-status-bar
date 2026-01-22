@@ -1,8 +1,8 @@
 import ArgumentParser
 import Foundation
 
-struct SetupCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct SetupCommand: ParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "setup",
         abstract: "Setup Claude Code hooks for monitoring"
     )
@@ -15,7 +15,9 @@ struct SetupCommand: ParsableCommand {
 
     private static let hookEvents = ["Notification", "Stop", "UserPromptSubmit"]
 
-    func run() throws {
+    public init() {}
+
+    public func run() throws {
         if uninstall {
             try performUninstall()
             return
