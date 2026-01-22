@@ -37,8 +37,15 @@ final class SessionStore {
             key = ccsbEvent.sessionId
         }
 
-        // Remove old sessions on same TTY
+        // Capture displayOrder from session being replaced on same TTY
+        var inheritedDisplayOrder: Int? = nil
         if let tty = ccsbEvent.tty, !tty.isEmpty {
+            for (k, v) in data.sessions {
+                if v.tty == tty && k != key {
+                    inheritedDisplayOrder = v.displayOrder
+                    break
+                }
+            }
             data.sessions = data.sessions.filter { (k, v) in
                 if v.tty == tty && k != key {
                     return false
@@ -50,6 +57,18 @@ final class SessionStore {
         // Create or update session
         let existing = data.sessions[key]
         var session = ccsbEvent.toSession(existingSession: existing)
+
+        // Handle displayOrder: inherit from replaced session or assign new
+        if existing == nil {
+            if let inherited = inheritedDisplayOrder {
+                session.displayOrder = inherited
+                DebugLog.log("[SessionStore] CCSB: inherited displayOrder \(inherited) from replaced TTY session")
+            } else {
+                let maxOrder = data.sessions.values.compactMap { $0.displayOrder }.max() ?? 0
+                session.displayOrder = maxOrder + 1
+                DebugLog.log("[SessionStore] CCSB: assigned new displayOrder \(maxOrder + 1)")
+            }
+        }
 
         // Capture Ghostty tab index for Bind-on-start on new sessions
         // Note: CCSB events don't have termProgram, so we check if Ghostty is the only terminal running
@@ -94,8 +113,15 @@ final class SessionStore {
             key = event.sessionId
         }
 
-        // Remove old sessions on same TTY
+        // Capture displayOrder from session being replaced on same TTY
+        var inheritedDisplayOrder: Int? = nil
         if let tty = event.tty, !tty.isEmpty {
+            for (k, v) in data.sessions {
+                if v.tty == tty && k != key {
+                    inheritedDisplayOrder = v.displayOrder
+                    break
+                }
+            }
             data.sessions = data.sessions.filter { (k, v) in
                 if v.tty == tty && k != key {
                     return false
@@ -147,6 +173,17 @@ final class SessionStore {
             }
 
             let (status, waitingReason, isToolRunning) = determineStatusAndReason(event: event, current: nil)
+            // Assign displayOrder: inherit from replaced session or assign new
+            let newDisplayOrder: Int
+            if let inherited = inheritedDisplayOrder {
+                newDisplayOrder = inherited
+                DebugLog.log("[SessionStore] Legacy: inherited displayOrder \(inherited) from replaced TTY session")
+            } else {
+                let maxOrder = data.sessions.values.compactMap { $0.displayOrder }.max() ?? 0
+                newDisplayOrder = maxOrder + 1
+                DebugLog.log("[SessionStore] Legacy: assigned new displayOrder \(maxOrder + 1)")
+            }
+
             session = Session(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
@@ -160,7 +197,8 @@ final class SessionStore {
                 editorBundleID: event.editorBundleID,
                 editorPID: event.editorPID,
                 waitingReason: waitingReason,
-                isToolRunning: isToolRunning
+                isToolRunning: isToolRunning,
+                displayOrder: newDisplayOrder
             )
         }
 
