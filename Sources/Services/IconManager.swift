@@ -86,8 +86,8 @@ final class IconManager {
             return baseIcon
         }
 
-        // 1-based display (tab 0 -> display "1")
-        let badgeText = "\(tabIndex + 1)"
+        // 1-based display (tab 0 -> display "⌘1")
+        let badgeText = "⌘\(tabIndex + 1)"
 
         // Create new image with badge
         let newImage = NSImage(size: baseIcon.size)
@@ -98,14 +98,12 @@ final class IconManager {
 
         // Badge configuration (bottom-right, rounded rectangle)
         let badgeHeight = size * 0.32
-        let badgeWidth = badgeHeight * 0.85
-        let cornerRadius = badgeHeight * 0.2
-        let margin = size * 0.02  // Small margin from edge
-
+        let badgeWidth = badgeHeight * 1.65  // Wider for ⌘ symbol
+        let cornerRadius = badgeHeight * 0.35
         // Position at bottom-right
         let badgeRect = NSRect(
-            x: size - badgeWidth - margin,
-            y: margin,
+            x: size - badgeWidth,
+            y: 0,
             width: badgeWidth,
             height: badgeHeight
         )
@@ -119,7 +117,7 @@ final class IconManager {
         badgePath.stroke()
 
         // Draw badge text
-        let fontSize = badgeHeight * 0.65
+        let fontSize = badgeHeight * 0.88
         let font = NSFont.boldSystemFont(ofSize: fontSize)
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: font,

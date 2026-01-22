@@ -1,12 +1,13 @@
 {
+  "UUID": "com.ccstatusbar",
   "Name": "CC Status Bar",
-  "Version": "1.0.0",
+  "Version": "1.0.0.0",
   "Author": "CC Status Bar",
   "Description": "Control Claude Code sessions from Stream Deck",
-  "Category": "Developer Tools",
+  "Category": "CC Status Bar",
   "CategoryIcon": "imgs/plugin-icon",
   "Icon": "imgs/plugin-icon",
-  "URL": "https://github.com/example/cc-status-bar",
+  "URL": "https://github.com/usedhonda/cc-status-bar",
   "CodePath": "bin/plugin.js",
   "PropertyInspectorPath": "ui/settings.html",
   "OS": [
@@ -16,7 +17,7 @@
     }
   ],
   "Software": {
-    "MinimumVersion": "6.0"
+    "MinimumVersion": "6.4"
   },
   "SDKVersion": 2,
   "Nodejs": {
@@ -34,7 +35,7 @@
         {
           "Image": "imgs/action-icons/session-empty",
           "TitleAlignment": "middle",
-          "FontSize": "10"
+          "FontSize": 10
         }
       ],
       "SupportedInMultiActions": false
@@ -98,23 +99,6 @@
         }
       ],
       "SupportedInMultiActions": true
-    }
-  ],
-  "Profiles": [
-    {
-      "DeviceType": 0,
-      "Name": "profiles/CCStatusBar Standard",
-      "DontAutoSwitchWhenInstalled": true
-    },
-    {
-      "DeviceType": 1,
-      "Name": "profiles/CCStatusBar Mini",
-      "DontAutoSwitchWhenInstalled": true
-    },
-    {
-      "DeviceType": 2,
-      "Name": "profiles/CCStatusBar XL",
-      "DontAutoSwitchWhenInstalled": true
     }
   ]
 }

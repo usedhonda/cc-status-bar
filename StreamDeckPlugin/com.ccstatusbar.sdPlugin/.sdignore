@@ -1,0 +1,15 @@
+# Source files (not needed in distribution)
+src/
+*.ts
+
+# Build configuration
+tsconfig.json
+package.json
+package-lock.json
+
+# Dependencies (bundled at build time)
+node_modules/
+
+# Development files
+plans/
+.gitignore
