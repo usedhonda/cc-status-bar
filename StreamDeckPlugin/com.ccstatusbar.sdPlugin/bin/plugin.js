@@ -378,13 +378,14 @@ function updateSessionButton(context, buttonInfo) {
     else {
         bgColor = '#8E8E93'; // Gray
     }
-    const svg = createSessionButtonSVG(session.project, bgColor, buttonInfo.buttonIndex);
+    const svg = createSessionButtonSVG(session.project, bgColor, buttonInfo.buttonIndex, session.icon_base64);
     setImage(context, svg);
 }
 /**
  * Create SVG for session button (72x72, max 3 lines, vertically centered)
+ * Layers: background color → terminal/editor icon → project name
  */
-function createSessionButtonSVG(projectName, bgColor, buttonIndex = 0) {
+function createSessionButtonSVG(projectName, bgColor, buttonIndex = 0, iconBase64) {
     const textColor = bgColor === '#FFCC00' ? '#000000' : '#FFFFFF';
     const maxCharsPerLine = 6;
     const fontSize = 18;
@@ -419,8 +420,13 @@ function createSessionButtonSVG(projectName, bgColor, buttonIndex = 0) {
     const totalTextHeight = lines.length * lineHeight;
     const startY = 36 - (totalTextHeight / 2) + (lineHeight / 2) + 4; // +4 for session number offset
     const textElements = lines.map((line, i) => `<text x="36" y="${startY + i * lineHeight}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="bold" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${escapeXml(line)}</text>`).join('\n');
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+    // Terminal/editor icon as background (40x40, centered, semi-transparent)
+    const iconElement = iconBase64
+        ? `<image x="16" y="16" width="40" height="40" opacity="0.35" href="data:image/png;base64,${iconBase64}"/>`
+        : '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="72" height="72" viewBox="0 0 72 72">
 <rect width="72" height="72" rx="8" fill="${bgColor}"/>
+${iconElement}
 <text x="4" y="12" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="bold" fill="${textColor}" opacity="0.7">${sessionNum}</text>
 ${textElements}
 </svg>`;

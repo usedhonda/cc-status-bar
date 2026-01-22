@@ -67,6 +67,41 @@ final class IconManager {
         }
     }
 
+    /// Get icon as base64 PNG data for Stream Deck
+    /// - Parameters:
+    ///   - env: Focus environment
+    ///   - size: Icon size (default 40x40)
+    /// - Returns: Base64 encoded PNG string or nil
+    func iconBase64(for env: FocusEnvironment, size: CGFloat = 40) -> String? {
+        guard let image = icon(for: env, size: size) else { return nil }
+
+        // Create a single bitmap at the specified size (avoid multi-resolution TIFF)
+        let intSize = Int(size)
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: intSize,
+            pixelsHigh: intSize,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        let rect = NSRect(x: 0, y: 0, width: size, height: size)
+        image.draw(in: rect)
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return pngData.base64EncodedString()
+    }
+
     /// Get icon with tab number badge for a FocusEnvironment
     /// - Parameters:
     ///   - env: Focus environment
