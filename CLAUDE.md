@@ -102,7 +102,7 @@ cp StreamDeckPlugin/cc-status-bar.sdPlugin/bin/plugin.js \
    ~/Library/Application\ Support/com.elgato.StreamDeck/Plugins/cc-status-bar.sdPlugin/bin/
 
 # Restart Stream Deck app
-pkill -x "Elgato Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
+pkill -x "Stream Deck" ; sleep 2 ; open -a "Elgato Stream Deck"
 ```
 
 ### Rules
@@ -127,7 +127,7 @@ pgrep -f "Stream Deck"
 kill -9 $(pgrep -f "Stream Deck")
 ```
 
-The script uses `pkill -x "Elgato Stream Deck"` which only kills the app process, not plugins.
+The script uses `pkill -x "Stream Deck"` which only kills the app process, not plugins.
 
 Killing plugin processes directly breaks other plugins (volume-controller, etc.) and causes system instability.
 
