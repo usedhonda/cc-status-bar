@@ -50,6 +50,19 @@ jobs:
       - name: Build
         run: swift build -c release
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Stream Deck Plugin
+        run: |
+          npm install -g @elgato/cli
+          cd StreamDeckPlugin/com.ccstatusbar.sdPlugin
+          npx tsc src/plugin.ts --outDir bin --target ES2020 --module CommonJS --esModuleInterop
+          cd ..
+          streamdeck pack com.ccstatusbar.sdPlugin
+
       - name: Copy binary to app bundle
         run: |
           mkdir -p CCStatusBar.app/Contents/MacOS
@@ -85,6 +98,7 @@ jobs:
           rm -rf /tmp/dmg-contents
           mkdir -p /tmp/dmg-contents
           cp -R CCStatusBar.app /tmp/dmg-contents/
+          cp StreamDeckPlugin/com.ccstatusbar.streamDeckPlugin "/tmp/dmg-contents/CC Status Bar.streamDeckPlugin"
           ln -s /Applications /tmp/dmg-contents/Applications
           hdiutil create -volname "CCStatusBar" -srcfolder /tmp/dmg-contents \
             -ov -format UDZO /tmp/CCStatusBar.dmg

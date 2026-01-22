@@ -244,6 +244,52 @@ final class SessionStore {
         DebugLog.log("[SessionStore] Tab index updated to \(tabIndex) for session: \(key)")
     }
 
+    /// Mark a session as acknowledged
+    func acknowledgeSession(sessionId: String, tty: String?) {
+        var data = loadData()
+        let key: String
+        if let tty = tty, !tty.isEmpty {
+            key = "\(sessionId):\(tty)"
+        } else {
+            key = sessionId
+        }
+
+        guard var session = data.sessions[key] else { return }
+        guard session.isAcknowledged != true else { return }  // Already acknowledged
+
+        session.isAcknowledged = true
+        session.updatedAt = Date()
+
+        data.sessions[key] = session
+        data.updatedAt = Date()
+
+        saveData(data)
+        DebugLog.log("[SessionStore] Session acknowledged: \(key)")
+    }
+
+    /// Clear acknowledged flag for a session (when it returns to running)
+    func clearAcknowledged(sessionId: String, tty: String?) {
+        var data = loadData()
+        let key: String
+        if let tty = tty, !tty.isEmpty {
+            key = "\(sessionId):\(tty)"
+        } else {
+            key = sessionId
+        }
+
+        guard var session = data.sessions[key] else { return }
+        guard session.isAcknowledged == true else { return }  // Not acknowledged
+
+        session.isAcknowledged = nil
+        session.updatedAt = Date()
+
+        data.sessions[key] = session
+        data.updatedAt = Date()
+
+        saveData(data)
+        DebugLog.log("[SessionStore] Acknowledged cleared: \(key)")
+    }
+
     func clearSessions() {
         saveData(StoreData())
     }

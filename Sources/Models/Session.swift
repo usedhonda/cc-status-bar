@@ -20,6 +20,7 @@ struct Session: Codable, Identifiable {
     var editorPID: pid_t?  // Editor process ID for direct activation (reliable for multiple instances)
     var waitingReason: WaitingReason?  // Reason for waitingInput status (permissionPrompt=red, stop/unknown=yellow)
     var isToolRunning: Bool?  // true during PreToolUse..PostToolUse (show spinner)
+    var isAcknowledged: Bool?  // true if user has seen this waiting session (show as green)
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -54,5 +55,6 @@ struct Session: Codable, Identifiable {
         case editorPID = "editor_pid"
         case waitingReason = "waiting_reason"
         case isToolRunning = "is_tool_running"
+        case isAcknowledged = "is_acknowledged"
     }
 }

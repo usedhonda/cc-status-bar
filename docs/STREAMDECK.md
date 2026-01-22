@@ -41,8 +41,8 @@ StreamDeckPlugin/cc-status-bar.sdPlugin/
 | Action ID | Name | Function |
 |-----------|------|----------|
 | `com.ccstatusbar.session` | Session | Display session status, click to focus terminal |
-| `com.ccstatusbar.scroll-up` | Scroll Up | Scroll session list up (offset -= 10) |
-| `com.ccstatusbar.scroll-down` | Scroll Down | Scroll session list down (offset += 10) |
+| `com.ccstatusbar.scroll-up` | Up Arrow | Send Up Arrow key to frontmost app |
+| `com.ccstatusbar.scroll-down` | Down Arrow | Send Down Arrow key to frontmost app |
 | `com.ccstatusbar.dictation` | Dictation | Toggle macOS dictation |
 | `com.ccstatusbar.enter` | Enter | Send Enter key to frontmost app |
 | `com.ccstatusbar.escape` | Escape | Send Escape key to frontmost app |
@@ -62,6 +62,27 @@ StreamDeckPlugin/cc-status-bar.sdPlugin/
 Calls `CCStatusBar dictation` CLI command, which:
 1. Tries `AXStartDictation` accessibility action (primary)
 2. Falls back to AppleScript Edit menu click (backup)
+
+### 2.3 Keyboard Key Actions
+
+All keyboard actions send keys via AppleScript to the frontmost application.
+
+| Action | Key | macOS Key Code |
+|--------|-----|----------------|
+| Up Arrow | ↑ | 126 |
+| Down Arrow | ↓ | 125 |
+| Enter | ⏎ | 36 |
+| Escape | ⎋ | 53 |
+
+**Implementation:**
+```applescript
+tell application "System Events" to key code <code>
+```
+
+**Use Case**: Claude Code vibe coding workflow
+- Up/Down Arrow: Select prompts in Claude Code CLI
+- Enter: Confirm selection
+- Escape: Cancel operation
 
 ---
 
@@ -198,6 +219,25 @@ open -a "Elgato Stream Deck"
 ## 5. Development Notes
 
 ### 5.1 Debugging
+
+#### Plugin Debug Log
+
+The plugin writes debug logs to:
+```
+~/Library/Logs/CCStatusBar/streamdeck-plugin.log
+```
+
+Log contents:
+- WebSocket connection status
+- All incoming events (willAppear, keyDown, etc.)
+- Action execution
+
+```bash
+# Watch plugin log in real time
+tail -f ~/Library/Logs/CCStatusBar/streamdeck-plugin.log
+```
+
+#### Stream Deck Console
 
 ```bash
 # Watch plugin logs (Stream Deck console)
