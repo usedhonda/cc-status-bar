@@ -61,6 +61,12 @@ struct ListCommand: ParsableCommand {
             if session.isAcknowledged == true {
                 item["is_acknowledged"] = true
             }
+            // Add environment label and icon for Stream Deck
+            item["environment"] = session.environmentLabel
+            let env = EnvironmentResolver.shared.resolve(session: session)
+            if let iconBase64 = IconManager.shared.iconBase64(for: env, size: 40) {
+                item["icon_base64"] = iconBase64
+            }
             jsonSessions.append(item)
         }
 
