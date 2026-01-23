@@ -2,7 +2,7 @@
 
 A native macOS menu bar app for real-time monitoring of Claude Code sessions.
 
-![Screenshot](assets/screenshot-v2.png)
+![Screenshot](assets/screenshot-v3.png)
 
 ## Features
 
