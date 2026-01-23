@@ -62,6 +62,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Setup global hotkey
         setupHotkey()
 
+        // Start web server if enabled
+        if AppSettings.webServerEnabled {
+            do {
+                try WebServer.shared.start()
+            } catch {
+                DebugLog.log("[AppDelegate] Failed to start web server: \(error)")
+            }
+        }
+
         // Watch for terminal app activation to auto-acknowledge sessions
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -85,6 +94,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: .focusSession,
             object: nil
         )
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        WebServer.shared.stop()
+        DebugLog.log("[AppDelegate] Application will terminate")
     }
 
     // MARK: - Hotkey
@@ -335,6 +349,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkeyItem.state = hotkeyEnabled ? .on : .off
         menu.addItem(hotkeyItem)
 
+        // Web Server
+        let webServerDesc = WebServer.shared.isRunning ? " (:\(WebServer.shared.actualPort))" : ""
+        let webServerItem = NSMenuItem(
+            title: "Web Server\(webServerDesc)",
+            action: #selector(toggleWebServer(_:)),
+            keyEquivalent: ""
+        )
+        webServerItem.target = self
+        webServerItem.state = WebServer.shared.isRunning ? .on : .off
+        menu.addItem(webServerItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Permissions submenu
@@ -388,6 +413,33 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.state = newState ? .on : .off
         DebugLog.log("[AppDelegate] Global hotkey \(newState ? "enabled" : "disabled")")
         refreshUI()  // Update menu to show/hide hotkey description
+    }
+
+    @MainActor @objc private func toggleWebServer(_ sender: NSMenuItem) {
+        let newState = !AppSettings.webServerEnabled
+        AppSettings.webServerEnabled = newState
+        sender.state = newState ? .on : .off
+
+        if newState {
+            do {
+                try WebServer.shared.start()
+                DebugLog.log("[AppDelegate] Web server started")
+            } catch {
+                DebugLog.log("[AppDelegate] Failed to start web server: \(error)")
+                // Revert setting on failure
+                AppSettings.webServerEnabled = false
+                sender.state = .off
+                showAlert(
+                    title: "Web Server Error",
+                    message: "Failed to start web server: \(error.localizedDescription)"
+                )
+            }
+        } else {
+            WebServer.shared.stop()
+            DebugLog.log("[AppDelegate] Web server stopped")
+        }
+
+        refreshUI()  // Update menu to show/hide port
     }
 
     private func createTimeoutMenu() -> NSMenu {
