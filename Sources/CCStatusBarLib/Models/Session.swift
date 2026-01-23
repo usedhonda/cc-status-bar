@@ -6,7 +6,7 @@ enum WaitingReason: String, Codable {
     case unknown = "unknown"                     // Yellow - legacy/unknown reason
 }
 
-struct Session: Codable, Identifiable {
+struct Session: Codable, Identifiable, Equatable {
     let sessionId: String
     let cwd: String
     let tty: String?
