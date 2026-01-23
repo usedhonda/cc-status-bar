@@ -243,14 +243,96 @@ final class WebServer {
                 .refresh-btn:active {
                     background: #0056b3;
                 }
+                .settings-bar {
+                    background: #2a2a2a;
+                    padding: 12px 16px;
+                    margin-bottom: 16px;
+                    border-radius: 12px;
+                    display: flex;
+                    gap: 12px;
+                    align-items: center;
+                    flex-wrap: wrap;
+                }
+                .settings-bar label {
+                    font-size: 13px;
+                    color: #aaa;
+                }
+                .settings-bar input {
+                    background: #1a1a1a;
+                    border: 1px solid #444;
+                    border-radius: 6px;
+                    padding: 8px 12px;
+                    color: #fff;
+                    font-size: 14px;
+                    width: 120px;
+                }
+                .settings-bar input:focus {
+                    outline: none;
+                    border-color: #007aff;
+                }
+                .settings-bar .save-btn {
+                    background: #30d158;
+                    color: #fff;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    cursor: pointer;
+                }
+                .settings-bar .save-btn:active {
+                    background: #28b84d;
+                }
+                .settings-bar .status-msg {
+                    font-size: 12px;
+                    color: #30d158;
+                }
+                .no-key-warning {
+                    background: #3a2a00;
+                    color: #ffcc00;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                    font-size: 13px;
+                }
             </style>
         </head>
         <body>
             <h1>Claude Code Sessions (tmux)</h1>
+            <div class="settings-bar">
+                <label>Blink URL Key:</label>
+                <input type="text" id="urlKeyInput" placeholder="e.g. ABC123" maxlength="20">
+                <button class="save-btn" onclick="saveUrlKey()">Save</button>
+                <span id="saveStatus" class="status-msg"></span>
+            </div>
+            <div id="keyWarning" class="no-key-warning" style="display:none;">
+                Set your Blink URL Key above to enable Connect buttons.<br>
+                Find it in Blink: config → X-Callback-URL
+            </div>
             <div id="sessions"><div class="loading">Loading...</div></div>
             <button class="refresh-btn" onclick="loadSessions()">↻</button>
 
             <script>
+                // URL Key management
+                function getUrlKey() {
+                    return localStorage.getItem('blinkUrlKey') || '';
+                }
+
+                function saveUrlKey() {
+                    const key = document.getElementById('urlKeyInput').value.trim();
+                    if (key) {
+                        localStorage.setItem('blinkUrlKey', key);
+                        document.getElementById('saveStatus').textContent = 'Saved!';
+                        setTimeout(() => document.getElementById('saveStatus').textContent = '', 2000);
+                        loadSessions(); // Refresh to show Connect buttons
+                    }
+                }
+
+                function initUrlKey() {
+                    const saved = getUrlKey();
+                    document.getElementById('urlKeyInput').value = saved;
+                    document.getElementById('keyWarning').style.display = saved ? 'none' : 'block';
+                }
+
                 function formatTime(isoString) {
                     const date = new Date(isoString);
                     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -266,6 +348,9 @@ final class WebServer {
                 }
 
                 function loadSessions() {
+                    const urlKey = getUrlKey();
+                    document.getElementById('keyWarning').style.display = urlKey ? 'none' : 'block';
+
                     fetch('/api/sessions')
                         .then(r => r.json())
                         .then(data => {
@@ -287,11 +372,13 @@ final class WebServer {
 
                                 if (s.tmux) {
                                     tmuxHtml = '<div class="tmux-info">tmux: ' + s.tmux.session + '</div>';
-                                    // Generate Blink Shell deep link
-                                    // Format: blink://run?command=ssh%20mac%20-t%20tmux%20attach%20-t%20session
-                                    const sshCmd = 'ssh mac -t ' + s.tmux.attach_command;
-                                    const blinkUrl = 'blink://run?command=' + encodeURIComponent(sshCmd);
-                                    connectHtml = '<a class="connect-btn" href="' + blinkUrl + '">Connect via Blink</a>';
+                                    // Generate Blink Shell deep link (only if URL key is set)
+                                    if (urlKey) {
+                                        const sess = s.tmux.session;
+                                        const sshCmd = 'ssh -t mac /Users/usedhonda/bin/tmux-attach.sh ' + sess;
+                                        const blinkUrl = 'blinkshell://run?key=' + urlKey + '&cmd=' + encodeURIComponent(sshCmd);
+                                        connectHtml = '<a class="connect-btn" href="' + blinkUrl + '">Connect via Blink</a>';
+                                    }
                                 }
 
                                 div.innerHTML =
@@ -319,7 +406,8 @@ final class WebServer {
                               .replace(/"/g, '&quot;');
                 }
 
-                // Initial load
+                // Initialize
+                initUrlKey();
                 loadSessions();
 
                 // Auto-refresh every 5 seconds
