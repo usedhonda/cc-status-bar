@@ -195,6 +195,12 @@ Settings >
 │   ├── 6 hours
 │   └── Never
 ├── Global Hotkey (toggle) ← shows ⌘⇧C when enabled
+├── Web Server (toggle) ← shows port when enabled
+├── Color Theme >
+│   ├── Vibrant ← default
+│   ├── Muted
+│   ├── Warm
+│   └── Cool
 ├── ─────────────
 ├── Permissions >
 │   ├── ✓/✗ Accessibility status
@@ -697,3 +703,50 @@ Attach states are cached for 5 seconds to avoid excessive tmux commands.
 - **Methods**: `getSessionAttachStates()`, `isSessionAttached(_:)`
 - **File**: `Sources/App/AppDelegate.swift`
 - **Method**: `createSessionMenuItem(_:)`, `createSessionActionsMenu(session:isAcknowledged:isTmuxDetached:)`, `copyAttachCommand(_:)`
+
+---
+
+## 19. Color Theme
+
+### 19.1 Purpose
+
+Customize menu bar status colors for better visibility and aesthetic preference. Addresses feedback that default yellow is too harsh/bright.
+
+### 19.2 Available Themes
+
+| Theme | Description |
+|-------|-------------|
+| Vibrant | Original bright system colors (systemRed, systemYellow, systemGreen) |
+| Muted | Softer colors, especially yellow → tan |
+| Warm | Orange-tinted palette |
+| Cool | Cyan/teal palette |
+
+### 19.3 Color Mapping
+
+| Status | Vibrant | Muted | Warm | Cool |
+|--------|---------|-------|------|------|
+| Red | systemRed | Salmon (#E57373) | Coral (#FF7043) | Pink (#F48FB1) |
+| Yellow | systemYellow | Tan (#D4A574) | Orange (#FFB74D) | Cyan (#4DD0E1) |
+| Green | systemGreen | Sage (#81C784) | Lime (#AED581) | Teal (#4DB6AC) |
+| White | white | white | white | white |
+
+### 19.4 Storage
+
+- Key: `colorTheme`
+- Storage: UserDefaults
+- Default: `vibrant`
+
+### 19.5 Affected Elements
+
+- Menu bar "CC" text color
+- Menu bar count display colors
+- Session list symbol colors
+
+### 19.6 Implementation
+
+- **File**: `Sources/Services/ColorTheme.swift`
+- **Enum**: `ColorTheme`
+- **File**: `Sources/Services/AppSettings.swift`
+- **Property**: `colorTheme`
+- **File**: `Sources/App/AppDelegate.swift`
+- **Methods**: `updateStatusTitle()`, `createSessionMenuItem(_:)`, `createColorThemeMenu()`, `setColorTheme(_:)`
