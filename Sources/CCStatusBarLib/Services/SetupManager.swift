@@ -287,9 +287,10 @@ final class SetupManager {
 
         for eventName in Self.hookEvents {
             // Process existing hooks for this event
+            // Strategy: Remove CCStatusBar hooks from all entries, keep other tools' hooks intact,
+            // then add CCStatusBar as a separate independent entry (no merging)
             var filtered: [[String: Any]] = []
             var hadExistingCCStatusBarHook = false
-            var addedToExistingEntry = false
 
             if let eventHooks = hooks[eventName] {
                 for var hookEntry in eventHooks {
@@ -297,9 +298,6 @@ final class SetupManager {
                         filtered.append(hookEntry)
                         continue
                     }
-
-                    // Check if this entry has a matcher
-                    let hasMatcher = hookEntry["matcher"] != nil
 
                     // Remove any existing CCStatusBar hooks from this entry
                     innerHooks = innerHooks.filter { hook in
@@ -311,14 +309,7 @@ final class SetupManager {
                         return true
                     }
 
-                    // If this entry has no matcher and still has other hooks,
-                    // add CCStatusBar hook to this entry (merge with existing)
-                    if !hasMatcher && !innerHooks.isEmpty && !addedToExistingEntry {
-                        innerHooks.append(["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"])
-                        addedToExistingEntry = true
-                    }
-
-                    // Keep this entry if it still has hooks
+                    // Keep this entry if it still has hooks (preserve other tools' hooks)
                     if !innerHooks.isEmpty {
                         hookEntry["hooks"] = innerHooks
                         filtered.append(hookEntry)
@@ -326,16 +317,14 @@ final class SetupManager {
                 }
             }
 
-            // If we didn't add to an existing entry, create a new one
-            if !addedToExistingEntry {
-                let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
-                filtered.append(entry)
-            }
+            // Always add CCStatusBar as a separate independent entry (never merge)
+            let entry = createHookEntry(eventName: eventName, hookPath: hookPath)
+            filtered.append(entry)
 
             hooks[eventName] = filtered
 
             // Track if we need to update
-            if !hadExistingCCStatusBarHook || addedToExistingEntry {
+            if !hadExistingCCStatusBarHook {
                 needsUpdate = true
             }
         }
