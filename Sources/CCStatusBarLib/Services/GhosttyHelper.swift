@@ -51,8 +51,11 @@ enum GhosttyHelper {
 
     /// Check if tab title matches target session name
     /// Uses strict matching to avoid false positives (e.g., "t" matching "status")
+    /// Handles emoji prefixes (e.g., "🔔 cc-status-bar:dev" → "cc-status-bar:dev")
     private static func titleMatches(_ title: String, target: String) -> Bool {
-        let lowTitle = title.lowercased()
+        // Strip leading emoji/symbol prefix (e.g., "🔔 " → "")
+        let cleanTitle = stripLeadingEmoji(title)
+        let lowTitle = cleanTitle.lowercased()
         let lowTarget = target.lowercased()
 
         // 1. Exact match
@@ -77,6 +80,32 @@ enum GhosttyHelper {
         }
 
         return false
+    }
+
+    /// Remove leading emoji and symbols from string
+    /// e.g., "🔔 cc-status-bar:dev" → "cc-status-bar:dev"
+    private static func stripLeadingEmoji(_ string: String) -> String {
+        var result = string
+        while let first = result.unicodeScalars.first {
+            // Check if it's an emoji or symbol (not letter/number/punctuation)
+            if first.properties.isEmoji && !first.isASCII {
+                result.removeFirst()
+                // Also remove trailing space after emoji
+                if result.hasPrefix(" ") {
+                    result.removeFirst()
+                }
+            } else if first.properties.generalCategory == .otherSymbol ||
+                      first.properties.generalCategory == .mathSymbol {
+                result.removeFirst()
+                // Also remove trailing space after symbol
+                if result.hasPrefix(" ") {
+                    result.removeFirst()
+                }
+            } else {
+                break
+            }
+        }
+        return result
     }
 
     // MARK: - Accessibility API based tab control (Gemini recommended)

@@ -71,6 +71,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // Start WebSocket session observation (for iOS app real-time updates)
+        WebSocketManager.shared.observeSessions(sessionObserver.$sessions)
+
         // Watch for terminal app activation to auto-acknowledge sessions
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -350,23 +353,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkeyItem.state = hotkeyEnabled ? .on : .off
         menu.addItem(hotkeyItem)
 
-        // Web Server
-        let webServerDesc = WebServer.shared.isRunning ? " (:\(WebServer.shared.actualPort))" : ""
-        let webServerItem = NSMenuItem(
-            title: "Web Server\(webServerDesc)",
-            action: #selector(toggleWebServer(_:)),
-            keyEquivalent: ""
-        )
-        webServerItem.target = self
-        webServerItem.state = WebServer.shared.isRunning ? .on : .off
-        menu.addItem(webServerItem)
-
         // Color Theme submenu
         let colorThemeItem = NSMenuItem(title: "Color Theme", action: nil, keyEquivalent: "")
         colorThemeItem.submenu = createColorThemeMenu()
         menu.addItem(colorThemeItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        // vibeterm (iOS app) submenu
+        let vibetermItem = NSMenuItem(title: "vibeterm", action: nil, keyEquivalent: "")
+        vibetermItem.submenu = createVibetermMenu()
+        menu.addItem(vibetermItem)
 
         // Permissions submenu
         let permissionsItem = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
@@ -411,6 +408,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openAccessibilitySettings() {
         PermissionManager.openAccessibilitySettings()
+    }
+
+    @objc private func showIOSConnectionSetup() {
+        ConnectionSetupWindowController.shared.showWindow()
     }
 
     @MainActor @objc private func toggleGlobalHotkey(_ sender: NSMenuItem) {
@@ -479,6 +480,37 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             menu.addItem(item)
         }
+
+        return menu
+    }
+
+    private func createVibetermMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        // Server toggle
+        let serverRunning = WebServer.shared.isRunning
+        let serverTitle = serverRunning
+            ? "Server :\(WebServer.shared.actualPort)"
+            : "Server Off"
+        let serverItem = NSMenuItem(
+            title: serverTitle,
+            action: #selector(toggleWebServer(_:)),
+            keyEquivalent: ""
+        )
+        serverItem.target = self
+        serverItem.state = serverRunning ? .on : .off
+        menu.addItem(serverItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Show QR Code
+        let qrItem = NSMenuItem(
+            title: "Show QR Code...",
+            action: #selector(showIOSConnectionSetup),
+            keyEquivalent: ""
+        )
+        qrItem.target = self
+        menu.addItem(qrItem)
 
         return menu
     }
