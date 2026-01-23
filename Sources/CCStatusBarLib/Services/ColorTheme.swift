@@ -60,8 +60,17 @@ public enum ColorTheme: String, CaseIterable {
         }
     }
 
-    /// Color for idle/no sessions (white) - same across all themes
+    /// Color for idle/no sessions
     public var whiteColor: NSColor {
-        return .white
+        switch self {
+        case .vibrant:
+            return .white
+        case .muted:
+            return NSColor(red: 0.90, green: 0.87, blue: 0.82, alpha: 1.0)  // Warm gray #E6DED1
+        case .warm:
+            return NSColor(red: 1.0, green: 0.95, blue: 0.88, alpha: 1.0)   // Soft cream #FFF2E0
+        case .cool:
+            return NSColor(red: 0.85, green: 0.90, blue: 0.95, alpha: 1.0)  // Soft blue-gray #D9E6F2
+        }
     }
 }

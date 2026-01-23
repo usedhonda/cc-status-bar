@@ -489,13 +489,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for theme in ColorTheme.allCases {
             let item = NSMenuItem(
-                title: theme.displayName,
+                title: "",
                 action: #selector(setColorTheme(_:)),
                 keyEquivalent: ""
             )
             item.target = self
             item.representedObject = theme
             item.state = (currentTheme == theme) ? .on : .off
+
+            // Build attributed title with 4 color dots + theme name
+            let attributed = NSMutableAttributedString()
+            let dotFont = NSFont.systemFont(ofSize: 12)
+            let textFont = NSFont.systemFont(ofSize: 13)
+
+            // Add 4 color dots: red, yellow, green, white
+            for color in [theme.redColor, theme.yellowColor, theme.greenColor, theme.whiteColor] {
+                attributed.append(NSAttributedString(
+                    string: "●",
+                    attributes: [.foregroundColor: color, .font: dotFont]
+                ))
+            }
+
+            // Add space and theme name
+            attributed.append(NSAttributedString(
+                string: "  \(theme.displayName)",
+                attributes: [.foregroundColor: NSColor.labelColor, .font: textFont]
+            ))
+
+            item.attributedTitle = attributed
             menu.addItem(item)
         }
 
