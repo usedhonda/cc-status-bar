@@ -157,15 +157,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let totalCount = redCount + yellowCount + greenCount
 
         // "CC" color: red > yellow > green > white priority
+        let theme = AppSettings.colorTheme
         let ccColor: NSColor
         if redCount > 0 {
-            ccColor = .systemRed
+            ccColor = theme.redColor
         } else if yellowCount > 0 {
-            ccColor = .systemYellow
+            ccColor = theme.yellowColor
         } else if greenCount > 0 {
-            ccColor = .systemGreen
+            ccColor = theme.greenColor
         } else {
-            ccColor = .white
+            ccColor = theme.whiteColor
         }
 
         // No spinner in menu bar - just static "CC"
@@ -188,12 +189,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             attributed.append(NSAttributedString(string: " "))
             attributed.append(NSAttributedString(
                 string: "\(redCount)",
-                attributes: [.foregroundColor: NSColor.systemRed, .font: font]
+                attributes: [.foregroundColor: theme.redColor, .font: font]
             ))
             if yellowCount + greenCount > 0 {
                 attributed.append(NSAttributedString(
                     string: "/\(totalCount)",
-                    attributes: [.foregroundColor: NSColor.white, .font: font]
+                    attributes: [.foregroundColor: theme.whiteColor, .font: font]
                 ))
             }
         } else if yellowCount > 0 {
@@ -201,12 +202,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             attributed.append(NSAttributedString(string: " "))
             attributed.append(NSAttributedString(
                 string: "\(yellowCount)",
-                attributes: [.foregroundColor: NSColor.systemYellow, .font: font]
+                attributes: [.foregroundColor: theme.yellowColor, .font: font]
             ))
             if greenCount > 0 {
                 attributed.append(NSAttributedString(
                     string: "/\(totalCount)",
-                    attributes: [.foregroundColor: NSColor.white, .font: font]
+                    attributes: [.foregroundColor: theme.whiteColor, .font: font]
                 ))
             }
         } else if greenCount > 0 {
@@ -360,6 +361,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServerItem.state = WebServer.shared.isRunning ? .on : .off
         menu.addItem(webServerItem)
 
+        // Color Theme submenu
+        let colorThemeItem = NSMenuItem(title: "Color Theme", action: nil, keyEquivalent: "")
+        colorThemeItem.submenu = createColorThemeMenu()
+        menu.addItem(colorThemeItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Permissions submenu
@@ -477,6 +483,53 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
+    private func createColorThemeMenu() -> NSMenu {
+        let menu = NSMenu()
+        let currentTheme = AppSettings.colorTheme
+
+        for theme in ColorTheme.allCases {
+            let item = NSMenuItem(
+                title: "",
+                action: #selector(setColorTheme(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = theme
+            item.state = (currentTheme == theme) ? .on : .off
+
+            // Build attributed title with 4 color dots + theme name
+            let attributed = NSMutableAttributedString()
+            let dotFont = NSFont.systemFont(ofSize: 12)
+            let textFont = NSFont.systemFont(ofSize: 13)
+
+            // Add 4 color dots: red, yellow, green, white
+            for color in [theme.redColor, theme.yellowColor, theme.greenColor, theme.whiteColor] {
+                attributed.append(NSAttributedString(
+                    string: "●",
+                    attributes: [.foregroundColor: color, .font: dotFont]
+                ))
+            }
+
+            // Add space and theme name
+            attributed.append(NSAttributedString(
+                string: "  \(theme.displayName)",
+                attributes: [.foregroundColor: NSColor.labelColor, .font: textFont]
+            ))
+
+            item.attributedTitle = attributed
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @MainActor @objc private func setColorTheme(_ sender: NSMenuItem) {
+        guard let theme = sender.representedObject as? ColorTheme else { return }
+        AppSettings.colorTheme = theme
+        DebugLog.log("[AppDelegate] Color theme set to: \(theme.displayName)")
+        refreshUI()
+    }
+
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
         do {
             let newState = !LaunchManager.isEnabled
@@ -547,18 +600,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
+        let theme = AppSettings.colorTheme
         let symbolColor: NSColor
         if isTmuxDetached {
             symbolColor = .tertiaryLabelColor  // Grayed out for detached tmux
         } else if !isAcknowledged && session.status == .waitingInput {
             // Unacknowledged waiting: red for permission_prompt, yellow otherwise
-            symbolColor = (session.waitingReason == .permissionPrompt) ? .systemRed : .systemYellow
+            symbolColor = (session.waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
         } else {
             switch displayStatus {
             case .running:
-                symbolColor = .systemGreen
+                symbolColor = theme.greenColor
             case .waitingInput:
-                symbolColor = .systemYellow  // Fallback (shouldn't reach here if acknowledged)
+                symbolColor = theme.yellowColor  // Fallback (shouldn't reach here if acknowledged)
             case .stopped:
                 symbolColor = .systemGray
             }

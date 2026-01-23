@@ -7,6 +7,7 @@ enum AppSettings {
         static let sessionTimeoutMinutes = "sessionTimeoutMinutes"
         static let webServerEnabled = "webServerEnabled"
         static let webServerPort = "webServerPort"
+        static let colorTheme = "colorTheme"
     }
 
     static var launchAtLogin: Bool {
@@ -56,5 +57,13 @@ enum AppSettings {
             return UserDefaults.standard.integer(forKey: Keys.webServerPort)
         }
         set { UserDefaults.standard.set(newValue, forKey: Keys.webServerPort) }
+    }
+
+    static var colorTheme: ColorTheme {
+        get {
+            let raw = UserDefaults.standard.string(forKey: Keys.colorTheme) ?? "vibrant"
+            return ColorTheme(rawValue: raw) ?? .vibrant
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: Keys.colorTheme) }
     }
 }
