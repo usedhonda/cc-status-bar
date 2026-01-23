@@ -100,6 +100,39 @@ enum TmuxHelper {
         return true
     }
 
+    // MARK: - Remote Access Support
+
+    /// Information for remote access to a tmux session
+    struct RemoteAccessInfo {
+        let sessionName: String
+        let windowIndex: String
+        let paneIndex: String
+
+        /// Generate the tmux attach command for remote access
+        var attachCommand: String {
+            "tmux attach -t \(sessionName)"
+        }
+
+        /// Generate the full target specifier (session:window.pane)
+        var targetSpecifier: String {
+            "\(sessionName):\(windowIndex).\(paneIndex)"
+        }
+    }
+
+    /// Get remote access info for a session by TTY
+    /// - Parameter tty: The TTY path (e.g., "/dev/ttys001")
+    /// - Returns: RemoteAccessInfo if the session is in tmux, nil otherwise
+    static func getRemoteAccessInfo(for tty: String) -> RemoteAccessInfo? {
+        guard let paneInfo = getPaneInfo(for: tty) else {
+            return nil
+        }
+        return RemoteAccessInfo(
+            sessionName: paneInfo.session,
+            windowIndex: paneInfo.window,
+            paneIndex: paneInfo.pane
+        )
+    }
+
     // MARK: - Session Attach States
 
     /// Get attached status for all tmux sessions

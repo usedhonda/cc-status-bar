@@ -10,6 +10,9 @@ public struct ListCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output as JSON for Stream Deck integration")
     var json: Bool = false
 
+    @Flag(name: .long, help: "Include tmux attach commands for remote access")
+    var withTmux: Bool = false
+
     @Option(name: .long, help: "Offset for pagination (0-based)")
     var offset: Int = 0
 
@@ -36,7 +39,45 @@ public struct ListCommand: ParsableCommand {
 
         for session in sessions {
             let symbol = session.status.symbol
-            print("\(symbol) \(session.displayPath)")
+            print("\(symbol) \(session.projectName)")
+
+            if withTmux {
+                // Show detailed info for remote access
+                print("   Path: \(session.displayPath)")
+                print("   Status: \(session.status.label)")
+
+                // Show waiting reason and duration if applicable
+                if session.status == .waitingInput {
+                    if let reason = session.waitingReason {
+                        let reasonLabel = reason == .permissionPrompt ? "permission_prompt" : "stop"
+                        print("   Reason: \(reasonLabel)")
+                    }
+                    let waitingTime = formatWaitingTime(since: session.updatedAt)
+                    print("   Waiting: \(waitingTime)")
+                }
+
+                // Show tmux info if available
+                if let tty = session.tty,
+                   let remoteInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
+                    print("   Tmux: \(remoteInfo.targetSpecifier)")
+                    print("   Attach: \(remoteInfo.attachCommand)")
+                } else {
+                    print("   Tmux: N/A (not in tmux)")
+                }
+                print("")  // Blank line between sessions
+            }
+        }
+    }
+
+    /// Format waiting time as human-readable string
+    private func formatWaitingTime(since date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 {
+            return "\(seconds)s"
+        } else if seconds < 3600 {
+            return "\(seconds / 60)m"
+        } else {
+            return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
         }
     }
 
@@ -69,6 +110,26 @@ public struct ListCommand: ParsableCommand {
             if let iconBase64 = IconManager.shared.iconBase64(for: env, size: 40) {
                 item["icon_base64"] = iconBase64
             }
+
+            // Add tmux info for remote access (when --with-tmux is specified)
+            if withTmux {
+                if let tty = session.tty,
+                   let remoteInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
+                    item["tmux"] = [
+                        "session": remoteInfo.sessionName,
+                        "target": remoteInfo.targetSpecifier,
+                        "attach_command": remoteInfo.attachCommand
+                    ]
+                }
+
+                // Add waiting time for remote monitoring
+                if session.status == .waitingInput {
+                    let seconds = Int(Date().timeIntervalSince(session.updatedAt))
+                    item["waiting_seconds"] = seconds
+                    item["waiting_time"] = formatWaitingTime(since: session.updatedAt)
+                }
+            }
+
             jsonSessions.append(item)
         }
 
