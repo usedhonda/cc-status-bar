@@ -728,7 +728,11 @@ Customize menu bar status colors for better visibility and aesthetic preference.
 | Red | systemRed | Salmon (#E57373) | Coral (#FF7043) | Pink (#F48FB1) |
 | Yellow | systemYellow | Tan (#D4A574) | Orange (#FFB74D) | Cyan (#4DD0E1) |
 | Green | systemGreen | Sage (#81C784) | Lime (#AED581) | Teal (#4DB6AC) |
-| White | white | white | white | white |
+| White | white | Warm gray (#E6DED1) | Soft cream (#FFF2E0) | Soft blue-gray (#D9E6F2) |
+
+### 19.4 Menu Display
+
+Each theme shows 4 color preview dots (●●●●) before the theme name in the Color Theme submenu.
 
 ### 19.4 Storage
 
