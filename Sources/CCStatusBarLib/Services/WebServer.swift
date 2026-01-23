@@ -36,6 +36,70 @@ final class WebServer {
             return .ok(.json(self.sessionsToJSON()))
         }
 
+        // WebSocket /ws/sessions - Real-time session updates
+        httpServer["/ws/sessions"] = websocket(
+            connected: { wsSession in
+                Task { @MainActor in
+                    WebSocketManager.shared.subscribe(wsSession)
+                }
+            },
+            disconnected: { wsSession in
+                Task { @MainActor in
+                    WebSocketManager.shared.unsubscribe(wsSession)
+                }
+            }
+        )
+
+        // POST /api/sessions/:id/focus - Focus and acknowledge a session
+        httpServer.POST["/api/sessions/:id/focus"] = { request in
+            guard let sessionId = request.params[":id"] else {
+                return .badRequest(.text("Missing session ID"))
+            }
+
+            Task { @MainActor in
+                // Find session by ID (includes TTY in compound ID)
+                guard let session = SessionStore.shared.getSessions().first(where: { $0.id == sessionId || $0.sessionId == sessionId }) else {
+                    DebugLog.log("[WebServer] Focus: Session not found: \(sessionId)")
+                    return
+                }
+
+                // Focus the terminal
+                _ = FocusManager.shared.focus(session: session)
+
+                // Acknowledge the session
+                SessionStore.shared.acknowledgeSession(sessionId: session.sessionId, tty: session.tty)
+
+                DebugLog.log("[WebServer] Focus: Focused and acknowledged session: \(session.projectName)")
+            }
+
+            return .ok(.json(["success": true, "session_id": sessionId]))
+        }
+
+        // GET /api/icons - Terminal icons as base64 PNG
+        httpServer["/api/icons"] = { [weak self] _ in
+            guard self != nil else { return .internalServerError }
+            return .ok(.json(Self.iconsToJSON()))
+        }
+
+        // POST /api/sessions/:id/acknowledge - Acknowledge a session without focus
+        httpServer.POST["/api/sessions/:id/acknowledge"] = { request in
+            guard let sessionId = request.params[":id"] else {
+                return .badRequest(.text("Missing session ID"))
+            }
+
+            Task { @MainActor in
+                guard let session = SessionStore.shared.getSessions().first(where: { $0.id == sessionId || $0.sessionId == sessionId }) else {
+                    DebugLog.log("[WebServer] Acknowledge: Session not found: \(sessionId)")
+                    return
+                }
+
+                SessionStore.shared.acknowledgeSession(sessionId: session.sessionId, tty: session.tty)
+                DebugLog.log("[WebServer] Acknowledge: Acknowledged session: \(session.projectName)")
+            }
+
+            return .ok(.json(["success": true, "session_id": sessionId]))
+        }
+
         // Try ports starting from basePort
         var lastError: Error?
         for offset in 0..<maxPortAttempts {
@@ -92,8 +156,16 @@ final class WebServer {
                 "project": session.projectName,
                 "path": session.cwd,
                 "status": session.status.rawValue,
-                "updated_at": ISO8601DateFormatter().string(from: session.updatedAt)
+                "updated_at": ISO8601DateFormatter().string(from: session.updatedAt),
+                "is_acknowledged": session.isAcknowledged ?? false,
+                "attention_level": attentionLevel(for: session),
+                "terminal": session.environmentLabel
             ]
+
+            // Add TTY if available
+            if let tty = session.tty {
+                dict["tty"] = tty
+            }
 
             // Add tmux info if available
             if let tty = session.tty, let remoteInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
@@ -111,10 +183,69 @@ final class WebServer {
                 dict["waiting_reason"] = session.waitingReason?.rawValue ?? "unknown"
             }
 
+            // Add tool running status
+            if let isToolRunning = session.isToolRunning {
+                dict["is_tool_running"] = isToolRunning
+            }
+
             return dict
         }
 
         return ["sessions": sessionData]
+    }
+
+    /// Compute attention level: 0=green, 1=yellow, 2=red
+    private func attentionLevel(for session: Session) -> Int {
+        if session.status == .running || session.isAcknowledged == true {
+            return 0  // green
+        }
+        if session.status == .waitingInput {
+            return session.waitingReason == .permissionPrompt ? 2 : 1  // red or yellow
+        }
+        return 0  // stopped/unknown
+    }
+
+    /// Generate icons JSON for all known terminals/editors
+    /// Returns: {"terminal_name": "base64_png_data", ...}
+    private static func iconsToJSON() -> [String: String] {
+        var icons: [String: String] = [:]
+
+        // Get unique terminal names from current sessions
+        let sessions = SessionStore.shared.getSessions()
+        var environments: [String: FocusEnvironment] = [:]
+
+        for session in sessions {
+            let env = EnvironmentResolver.shared.resolve(session: session)
+            let name = env.displayName
+            if environments[name] == nil {
+                environments[name] = env
+            }
+        }
+
+        // Generate base64 icons for each environment
+        for (name, env) in environments {
+            if let base64 = IconManager.shared.iconBase64(for: env, size: 64) {
+                icons[name] = base64
+            }
+        }
+
+        // Also add common terminals that might not have active sessions
+        let commonTerminals: [(String, FocusEnvironment)] = [
+            ("Ghostty", .ghostty(hasTmux: false, tabIndex: nil, tmuxSessionName: nil)),
+            ("Ghostty/tmux", .ghostty(hasTmux: true, tabIndex: nil, tmuxSessionName: nil)),
+            ("iTerm2", .iterm2(hasTmux: false, tabIndex: nil, tmuxSessionName: nil)),
+            ("iTerm2/tmux", .iterm2(hasTmux: true, tabIndex: nil, tmuxSessionName: nil)),
+            ("Terminal", .terminal(hasTmux: false, tmuxSessionName: nil)),
+            ("Terminal/tmux", .terminal(hasTmux: true, tmuxSessionName: nil))
+        ]
+
+        for (name, env) in commonTerminals {
+            if icons[name] == nil, let base64 = IconManager.shared.iconBase64(for: env, size: 64) {
+                icons[name] = base64
+            }
+        }
+
+        return icons
     }
 
     // MARK: - HTML UI
@@ -126,7 +257,7 @@ final class WebServer {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-            <title>CC Sessions (tmux)</title>
+            <title>CC Status Bar</title>
             <style>
                 * {
                     box-sizing: border-box;
@@ -202,21 +333,6 @@ final class WebServer {
                     font-size: 12px;
                     color: #666;
                 }
-                .connect-btn {
-                    display: inline-block;
-                    background: #007aff;
-                    color: #fff;
-                    padding: 10px 20px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-size: 14px;
-                    font-weight: 500;
-                    margin-top: 12px;
-                    transition: background 0.2s;
-                }
-                .connect-btn:active {
-                    background: #0056b3;
-                }
                 .tmux-info {
                     font-size: 12px;
                     color: #888;
@@ -243,96 +359,14 @@ final class WebServer {
                 .refresh-btn:active {
                     background: #0056b3;
                 }
-                .settings-bar {
-                    background: #2a2a2a;
-                    padding: 12px 16px;
-                    margin-bottom: 16px;
-                    border-radius: 12px;
-                    display: flex;
-                    gap: 12px;
-                    align-items: center;
-                    flex-wrap: wrap;
-                }
-                .settings-bar label {
-                    font-size: 13px;
-                    color: #aaa;
-                }
-                .settings-bar input {
-                    background: #1a1a1a;
-                    border: 1px solid #444;
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    color: #fff;
-                    font-size: 14px;
-                    width: 120px;
-                }
-                .settings-bar input:focus {
-                    outline: none;
-                    border-color: #007aff;
-                }
-                .settings-bar .save-btn {
-                    background: #30d158;
-                    color: #fff;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 6px;
-                    font-size: 13px;
-                    cursor: pointer;
-                }
-                .settings-bar .save-btn:active {
-                    background: #28b84d;
-                }
-                .settings-bar .status-msg {
-                    font-size: 12px;
-                    color: #30d158;
-                }
-                .no-key-warning {
-                    background: #3a2a00;
-                    color: #ffcc00;
-                    padding: 12px 16px;
-                    border-radius: 8px;
-                    margin-bottom: 16px;
-                    font-size: 13px;
-                }
             </style>
         </head>
         <body>
-            <h1>Claude Code Sessions (tmux)</h1>
-            <div class="settings-bar">
-                <label>Blink URL Key:</label>
-                <input type="text" id="urlKeyInput" placeholder="e.g. ABC123" maxlength="20">
-                <button class="save-btn" onclick="saveUrlKey()">Save</button>
-                <span id="saveStatus" class="status-msg"></span>
-            </div>
-            <div id="keyWarning" class="no-key-warning" style="display:none;">
-                Set your Blink URL Key above to enable Connect buttons.<br>
-                Find it in Blink: config → X-Callback-URL
-            </div>
+            <h1>CC Status Bar</h1>
             <div id="sessions"><div class="loading">Loading...</div></div>
             <button class="refresh-btn" onclick="loadSessions()">↻</button>
 
             <script>
-                // URL Key management
-                function getUrlKey() {
-                    return localStorage.getItem('blinkUrlKey') || '';
-                }
-
-                function saveUrlKey() {
-                    const key = document.getElementById('urlKeyInput').value.trim();
-                    if (key) {
-                        localStorage.setItem('blinkUrlKey', key);
-                        document.getElementById('saveStatus').textContent = 'Saved!';
-                        setTimeout(() => document.getElementById('saveStatus').textContent = '', 2000);
-                        loadSessions(); // Refresh to show Connect buttons
-                    }
-                }
-
-                function initUrlKey() {
-                    const saved = getUrlKey();
-                    document.getElementById('urlKeyInput').value = saved;
-                    document.getElementById('keyWarning').style.display = saved ? 'none' : 'block';
-                }
-
                 function formatTime(isoString) {
                     const date = new Date(isoString);
                     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -348,9 +382,6 @@ final class WebServer {
                 }
 
                 function loadSessions() {
-                    const urlKey = getUrlKey();
-                    document.getElementById('keyWarning').style.display = urlKey ? 'none' : 'block';
-
                     fetch('/api/sessions')
                         .then(r => r.json())
                         .then(data => {
@@ -368,17 +399,8 @@ final class WebServer {
                                 div.className = 'session ' + s.status + waitingClass;
 
                                 let tmuxHtml = '';
-                                let connectHtml = '';
-
                                 if (s.tmux) {
                                     tmuxHtml = '<div class="tmux-info">tmux: ' + s.tmux.session + '</div>';
-                                    // Generate Blink Shell deep link (only if URL key is set)
-                                    if (urlKey) {
-                                        const sess = s.tmux.session;
-                                        const sshCmd = 'ssh -t mac /Users/usedhonda/bin/tmux-attach.sh ' + sess;
-                                        const blinkUrl = 'blinkshell://run?key=' + urlKey + '&cmd=' + encodeURIComponent(sshCmd);
-                                        connectHtml = '<a class="connect-btn" href="' + blinkUrl + '">Connect via Blink</a>';
-                                    }
                                 }
 
                                 div.innerHTML =
@@ -386,8 +408,7 @@ final class WebServer {
                                     '<div class="path">' + escapeHtml(s.path.replace(/^\\/Users\\/[^\\/]+/, '~')) + '</div>' +
                                     '<span class="status ' + s.status + '">' + getStatusLabel(s.status, s.waiting_reason) + '</span>' +
                                     '<span class="time">' + formatTime(s.updated_at) + '</span>' +
-                                    tmuxHtml +
-                                    connectHtml;
+                                    tmuxHtml;
 
                                 el.appendChild(div);
                             });
@@ -407,7 +428,6 @@ final class WebServer {
                 }
 
                 // Initialize
-                initUrlKey();
                 loadSessions();
 
                 // Auto-refresh every 5 seconds
