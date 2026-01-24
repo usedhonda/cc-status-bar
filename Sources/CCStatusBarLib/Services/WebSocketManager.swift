@@ -4,7 +4,7 @@ import Combine
 
 /// WebSocket event types for iOS app communication
 enum WebSocketEventType: String {
-    case connected
+    case sessionsList = "sessions.list"
     case sessionAdded = "session.added"
     case sessionUpdated = "session.updated"
     case sessionRemoved = "session.removed"
@@ -15,25 +15,44 @@ struct WebSocketEvent {
     let type: WebSocketEventType
     let sessions: [[String: Any]]?
     let session: [String: Any]?
-    let timestamp: String
+    let sessionId: String?  // For session.removed
+    let icons: [String: String]?  // For sessions.list
+    let icon: String?  // For session.added (new terminal type only)
 
-    init(type: WebSocketEventType, sessions: [[String: Any]]? = nil, session: [String: Any]? = nil) {
+    init(
+        type: WebSocketEventType,
+        sessions: [[String: Any]]? = nil,
+        session: [String: Any]? = nil,
+        sessionId: String? = nil,
+        icons: [String: String]? = nil,
+        icon: String? = nil
+    ) {
         self.type = type
         self.sessions = sessions
         self.session = session
-        self.timestamp = ISO8601DateFormatter().string(from: Date())
+        self.sessionId = sessionId
+        self.icons = icons
+        self.icon = icon
     }
 
     func toJSON() -> String {
         var dict: [String: Any] = [
-            "type": type.rawValue,
-            "timestamp": timestamp
+            "type": type.rawValue
         ]
         if let sessions = sessions {
             dict["sessions"] = sessions
         }
         if let session = session {
             dict["session"] = session
+        }
+        if let sessionId = sessionId {
+            dict["session_id"] = sessionId
+        }
+        if let icons = icons {
+            dict["icons"] = icons
+        }
+        if let icon = icon {
+            dict["icon"] = icon
         }
 
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
@@ -54,6 +73,7 @@ final class WebSocketManager {
     private let clientQueue = DispatchQueue(label: "com.ccstatusbar.websocket.clients")
 
     private var previousSessions: [String: Session] = [:]
+    private var knownTerminalTypes = Set<String>()
     private var cancellables = Set<AnyCancellable>()
 
     private init() {}
@@ -67,10 +87,11 @@ final class WebSocketManager {
         }
         DebugLog.log("[WebSocketManager] Client connected (total: \(connectedClients.count))")
 
-        // Send initial session list
+        // Send initial session list with icons
         let sessions = SessionStore.shared.getSessions()
         let sessionsData = sessions.map { sessionToDict($0) }
-        let event = WebSocketEvent(type: .connected, sessions: sessionsData)
+        let icons = generateIcons(for: sessions)
+        let event = WebSocketEvent(type: .sessionsList, sessions: sessionsData, icons: icons)
         sendToClient(session, event: event)
     }
 
@@ -120,15 +141,26 @@ final class WebSocketManager {
         // Detect added sessions
         for session in sessions {
             if previousSessions[session.id] == nil {
-                let event = WebSocketEvent(type: .sessionAdded, session: sessionToDict(session))
+                // Check if this is a new terminal type
+                let terminalName = session.environmentLabel
+                let isNewTerminalType = !knownTerminalTypes.contains(terminalName)
+                var icon: String? = nil
+
+                if isNewTerminalType {
+                    knownTerminalTypes.insert(terminalName)
+                    let env = EnvironmentResolver.shared.resolve(session: session)
+                    icon = IconManager.shared.iconBase64(for: env, size: 64)
+                }
+
+                let event = WebSocketEvent(type: .sessionAdded, session: sessionToDict(session), icon: icon)
                 broadcast(event: event)
             }
         }
 
         // Detect removed sessions
-        for (id, session) in previousSessions {
+        for (id, _) in previousSessions {
             if currentSessionsById[id] == nil {
-                let event = WebSocketEvent(type: .sessionRemoved, session: ["session_id": session.sessionId])
+                let event = WebSocketEvent(type: .sessionRemoved, sessionId: id)
                 broadcast(event: event)
             }
         }
@@ -146,13 +178,15 @@ final class WebSocketManager {
 
     private func sessionToDict(_ session: Session) -> [String: Any] {
         var dict: [String: Any] = [
+            "id": session.id,
             "session_id": session.sessionId,
             "project": session.projectName,
-            "path": session.cwd,
+            "cwd": session.cwd,
             "status": session.status.rawValue,
             "updated_at": ISO8601DateFormatter().string(from: session.updatedAt),
             "is_acknowledged": session.isAcknowledged ?? false,
-            "attention_level": attentionLevel(for: session)
+            "attention_level": attentionLevel(for: session),
+            "terminal": session.environmentLabel
         ]
 
         if let tty = session.tty {
@@ -179,6 +213,24 @@ final class WebSocketManager {
         }
 
         return dict
+    }
+
+    /// Generate icons dictionary for all terminal types in sessions
+    private func generateIcons(for sessions: [Session]) -> [String: String] {
+        var icons: [String: String] = [:]
+
+        for session in sessions {
+            let terminalName = session.environmentLabel
+            if icons[terminalName] == nil {
+                let env = EnvironmentResolver.shared.resolve(session: session)
+                if let base64 = IconManager.shared.iconBase64(for: env, size: 64) {
+                    icons[terminalName] = base64
+                }
+                knownTerminalTypes.insert(terminalName)
+            }
+        }
+
+        return icons
     }
 
     /// Compute attention level: 0=green, 1=yellow, 2=red

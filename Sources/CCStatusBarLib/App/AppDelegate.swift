@@ -487,11 +487,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func createVibetermMenu() -> NSMenu {
         let menu = NSMenu()
 
-        // Server toggle
+        // WebSocket toggle
         let serverRunning = WebServer.shared.isRunning
         let serverTitle = serverRunning
-            ? "Server :\(WebServer.shared.actualPort)"
-            : "Server Off"
+            ? "WebSocket :\(WebServer.shared.actualPort)"
+            : "WebSocket Off"
         let serverItem = NSMenuItem(
             title: serverTitle,
             action: #selector(toggleWebServer(_:)),
