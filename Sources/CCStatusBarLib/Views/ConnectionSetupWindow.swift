@@ -99,7 +99,7 @@ struct ConnectionSetupView: View {
             .disabled(connectionURL == nil)
 
             // Help text
-            Text("Scan with cc-terminal app")
+            Text("Scan with vibeterm")
                 .font(.caption)
                 .foregroundColor(.secondary)
 

@@ -172,18 +172,25 @@ final class IconManager {
     // MARK: - Private
 
     private func fetchIcon(for bundleID: String, size: CGFloat) -> NSImage? {
-        // Use LSCopyApplicationURLsForBundleIdentifier to find app path
+        // Method 1: NSWorkspace.urlForApplication (preferred, more reliable)
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+            icon.size = NSSize(width: size, height: size)
+            return icon
+        }
+
+        // Method 2: LSCopyApplicationURLsForBundleIdentifier (fallback)
         var outError: Unmanaged<CFError>?
-        guard let appURLs = LSCopyApplicationURLsForBundleIdentifier(
+        if let appURLs = LSCopyApplicationURLsForBundleIdentifier(
             bundleID as CFString,
             &outError
         )?.takeRetainedValue() as? [URL],
-              let appURL = appURLs.first else {
-            return nil
+           let appURL = appURLs.first {
+            let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+            icon.size = NSSize(width: size, height: size)
+            return icon
         }
 
-        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
-        icon.size = NSSize(width: size, height: size)
-        return icon
+        return nil
     }
 }
