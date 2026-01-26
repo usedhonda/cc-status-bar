@@ -1,21 +1,32 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 
-/// Network type selection for connection setup
-enum NetworkType: String, CaseIterable {
-    case local = "Local"
-    case tailscale = "Tailscale"
-}
-
 /// SwiftUI view for iOS connection setup with QR code display
 struct ConnectionSetupView: View {
-    @State private var selectedNetwork: NetworkType = .local
+    @State private var selectedHost: ConnectionHost = .localIP
     @State private var localIP: String = "..."
-    @State private var tailscaleIP: String?
+    @State private var tailscaleStatus: TailscaleStatus?
     @State private var connectionURL: String?
     @State private var copied = false
 
     private let networkHelper = NetworkHelper.shared
+
+    /// Check if Tailscale is available and connected
+    private var hasTailscale: Bool {
+        tailscaleStatus != nil
+    }
+
+    /// Current host value to display
+    private var currentHostValue: String {
+        switch selectedHost {
+        case .localIP:
+            return localIP
+        case .tailscaleIP:
+            return tailscaleStatus?.ip ?? "Not available"
+        case .tailscaleHostname:
+            return tailscaleStatus?.hostname ?? "Not available"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -23,19 +34,15 @@ struct ConnectionSetupView: View {
             Text("iOS Connection Setup")
                 .font(.headline)
 
-            // Network selector (only if Tailscale is available)
-            if tailscaleIP != nil {
-                Picker("Network", selection: $selectedNetwork) {
-                    ForEach(NetworkType.allCases, id: \.self) { type in
-                        Text(type.rawValue).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .onChange(of: selectedNetwork) { _ in
-                    updateConnectionInfo()
+            // Network selector (3 options)
+            HStack(spacing: 0) {
+                ForEach(ConnectionHost.allCases, id: \.self) { host in
+                    hostButton(for: host)
                 }
             }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+            .padding(.horizontal)
 
             // QR Code
             if let url = connectionURL, let qrImage = generateQRCode(from: url) {
@@ -69,12 +76,7 @@ struct ConnectionSetupView: View {
             // Connection info
             VStack(alignment: .leading, spacing: 8) {
                 ConnectionInfoRow(label: "Name", value: Host.current().localizedName ?? "Unknown")
-                ConnectionInfoRow(
-                    label: "Host",
-                    value: selectedNetwork == .tailscale
-                        ? (tailscaleIP ?? "Not available")
-                        : localIP
-                )
+                ConnectionInfoRow(label: "Host", value: currentHostValue)
                 ConnectionInfoRow(label: "SSH Port", value: "22")
                 ConnectionInfoRow(
                     label: "API Port",
@@ -106,9 +108,43 @@ struct ConnectionSetupView: View {
             Spacer()
         }
         .padding()
-        .frame(width: 360, height: 480)
+        .frame(width: 360, height: 500)
         .onAppear {
             loadNetworkInfo()
+        }
+    }
+
+    // MARK: - Private Views
+
+    @ViewBuilder
+    private func hostButton(for host: ConnectionHost) -> some View {
+        let isSelected = selectedHost == host
+        let isDisabled = !isHostAvailable(host)
+
+        Button(action: {
+            if !isDisabled {
+                selectedHost = host
+                updateConnectionInfo()
+            }
+        }) {
+            Text(host.rawValue)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isDisabled ? .secondary.opacity(0.5) : (isSelected ? .white : .primary))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(isSelected ? Color.accentColor : Color.clear)
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+
+    private func isHostAvailable(_ host: ConnectionHost) -> Bool {
+        switch host {
+        case .localIP:
+            return localIP != "Not available"
+        case .tailscaleIP, .tailscaleHostname:
+            return hasTailscale
         }
     }
 
@@ -116,11 +152,13 @@ struct ConnectionSetupView: View {
 
     private func loadNetworkInfo() {
         localIP = networkHelper.getLocalIPAddress() ?? "Not available"
-        tailscaleIP = networkHelper.getTailscaleIP()
+        tailscaleStatus = networkHelper.getTailscaleStatus()
 
-        // Default to Tailscale if available
-        if tailscaleIP != nil {
-            selectedNetwork = .tailscale
+        // Default to Tailscale hostname if available, otherwise local IP
+        if hasTailscale {
+            selectedHost = .tailscaleHostname
+        } else {
+            selectedHost = .localIP
         }
 
         updateConnectionInfo()
@@ -128,7 +166,8 @@ struct ConnectionSetupView: View {
 
     private func updateConnectionInfo() {
         connectionURL = networkHelper.generateConnectionURL(
-            useTailscale: selectedNetwork == .tailscale
+            hostType: selectedHost,
+            tailscaleStatus: tailscaleStatus
         )
     }
 
@@ -205,7 +244,7 @@ final class ConnectionSetupWindowController {
             let newWindow = NSWindow(contentViewController: hostingController)
             newWindow.title = "iOS Connection Setup"
             newWindow.styleMask = [.titled, .closable]
-            newWindow.setContentSize(NSSize(width: 360, height: 480))
+            newWindow.setContentSize(NSSize(width: 360, height: 500))
             newWindow.center()
 
             // Keep reference to prevent deallocation

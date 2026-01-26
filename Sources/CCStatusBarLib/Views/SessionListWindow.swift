@@ -96,6 +96,7 @@ struct SessionListWindowView: View {
                     LazyVStack(spacing: 6) {
                         ForEach(observer.sessions) { session in
                             PinnedSessionRowView(session: session, observer: observer)
+                                .id("\(session.id)-\(session.updatedAt.timeIntervalSince1970)-\(session.status)")
                         }
                     }
                     .padding(6)
@@ -122,7 +123,7 @@ struct PinnedSessionRowView: View {
     var body: some View {
         HStack(spacing: 8) {
             // Terminal icon with badge
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topTrailing) {
                 if let nsImage = IconManager.shared.iconWithBadge(for: env, size: 48) {
                     Image(nsImage: nsImage)
                         .resizable()
@@ -142,7 +143,7 @@ struct PinnedSessionRowView: View {
                         Circle()
                             .stroke(Color(nsColor: NSColor(calibratedWhite: 0.15, alpha: 1.0)), lineWidth: 2)
                     )
-                    .offset(x: 3, y: 3)
+                    .offset(x: 0, y: 0)
             }
 
             // Session info

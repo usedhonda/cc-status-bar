@@ -149,6 +149,24 @@ If you have an Elgato Stream Deck, install the included plugin:
 | Escape | Send Escape key |
 | Dictation | Toggle macOS dictation |
 
+### iOS Remote Monitoring (Optional)
+
+Monitor Claude Code sessions from your iPhone using the companion app [vibeterm](https://apps.apple.com/app/vibeterm).
+
+**Setup:**
+1. Enable "Web Server" in Settings menu
+2. Click "Connect Mobile..." in the menu bar
+3. Choose connection type:
+   - **Local** - Same WiFi network only
+   - **TS IP** - Tailscale IP address (e.g., `100.x.x.x`)
+   - **TS Host** - Tailscale hostname (recommended for stability)
+4. Scan the QR code with vibeterm app
+
+**Requirements:**
+- [Tailscale](https://tailscale.com/) installed on both Mac and iPhone (for remote access)
+- Both devices connected to the same Tailscale network
+- iOS app: Allow "Local Network" access in iOS Settings
+
 ## Permissions
 
 - **Accessibility**: Required for terminal tab switching (Ghostty)
