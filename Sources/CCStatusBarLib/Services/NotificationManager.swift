@@ -94,15 +94,15 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
         if let (lastStatus, lastTime) = notificationCooldowns[session.id] {
             let elapsed = Date().timeIntervalSince(lastTime)
             if lastStatus == session.status && elapsed < cooldownInterval {
-                DebugLog.log("[NotificationManager] Cooldown active for \(session.projectName), skipping notification")
+                DebugLog.log("[NotificationManager] Cooldown active for \(session.displayName), skipping notification")
                 return
             }
         }
 
-        DebugLog.log("[NotificationManager] Sending: \(session.projectName) - Waiting for input")
+        DebugLog.log("[NotificationManager] Sending: \(session.displayName) - Waiting for input")
 
         let content = UNMutableNotificationContent()
-        content.title = session.projectName
+        content.title = session.displayName
         content.body = "Waiting for input • \(session.environmentLabel)"
         content.sound = .default
         content.categoryIdentifier = Self.categoryIdentifier  // Enable quick actions

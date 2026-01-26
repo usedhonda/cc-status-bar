@@ -22,13 +22,40 @@ struct Session: Codable, Identifiable, Equatable {
     var isToolRunning: Bool?  // true during PreToolUse..PostToolUse (show spinner)
     var isAcknowledged: Bool?  // true if user has seen this waiting session (show as green)
     var displayOrder: Int?  // Display order in menu (stable across restarts, inherited on TTY reuse)
+    var isDisambiguated: Bool?  // true if project name was expanded to parent/child format due to duplicate basenames
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
     }
 
+    /// Basename of cwd (for logging/search)
     var projectName: String {
         URL(fileURLWithPath: cwd).lastPathComponent
+    }
+
+    /// Display name: basename or parent/child format if disambiguated
+    var displayName: String {
+        if isDisambiguated == true {
+            // parent/child format for disambiguation
+            let components = cwd.split(separator: "/")
+            if components.count >= 2 {
+                return components.suffix(2).joined(separator: "/")
+            }
+        }
+        return projectName
+    }
+
+    /// Search terms for window title matching (high precision -> fallback order)
+    var searchTerms: [String] {
+        let components = cwd.split(separator: "/")
+        var terms: [String] = []
+        // parent/child format first (higher precision)
+        if components.count >= 2 {
+            terms.append(components.suffix(2).joined(separator: "/"))
+        }
+        // basename as fallback
+        terms.append(projectName)
+        return terms
     }
 
     var displayPath: String {
@@ -58,5 +85,6 @@ struct Session: Codable, Identifiable, Equatable {
         case isToolRunning = "is_tool_running"
         case isAcknowledged = "is_acknowledged"
         case displayOrder = "display_order"
+        case isDisambiguated = "is_disambiguated"
     }
 }

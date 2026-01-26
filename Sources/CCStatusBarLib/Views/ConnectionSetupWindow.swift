@@ -68,7 +68,7 @@ struct ConnectionSetupView: View {
 
             // Connection info
             VStack(alignment: .leading, spacing: 8) {
-                ConnectionInfoRow(label: "User", value: ProcessInfo.processInfo.userName)
+                ConnectionInfoRow(label: "Name", value: Host.current().localizedName ?? "Unknown")
                 ConnectionInfoRow(
                     label: "Host",
                     value: selectedNetwork == .tailscale

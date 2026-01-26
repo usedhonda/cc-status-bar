@@ -87,6 +87,9 @@ final class SessionStore {
         data.sessions[key] = session
         data.updatedAt = Date()
 
+        // Check for duplicate project names and mark for disambiguation
+        disambiguateIfNeeded(&data)
+
         saveData(data)
 
         DebugLog.log("[SessionStore] CCSB event processed: \(ccsbEvent.event.rawValue) for \(ccsbEvent.tool.name)")
@@ -204,6 +207,9 @@ final class SessionStore {
 
         data.sessions[key] = session
         data.updatedAt = now
+
+        // Check for duplicate project names and mark for disambiguation
+        disambiguateIfNeeded(&data)
 
         saveData(data)
 
@@ -333,6 +339,27 @@ final class SessionStore {
     }
 
     // MARK: - Private
+
+    /// Detect duplicate project basenames and mark them for disambiguation
+    /// Once marked, sessions stay disambiguated even if duplicates are removed (for stability)
+    private func disambiguateIfNeeded(_ data: inout StoreData) {
+        // Group sessions by basename
+        var basenameGroups: [String: [String]] = [:]  // basename -> [session keys]
+        for (key, session) in data.sessions {
+            let basename = URL(fileURLWithPath: session.cwd).lastPathComponent
+            basenameGroups[basename, default: []].append(key)
+        }
+
+        // Mark all sessions in duplicate groups as disambiguated
+        for (basename, keys) in basenameGroups where keys.count > 1 {
+            for key in keys {
+                if data.sessions[key]?.isDisambiguated != true {
+                    data.sessions[key]?.isDisambiguated = true
+                    DebugLog.log("[SessionStore] Disambiguated session '\(basename)' -> '\(data.sessions[key]?.displayName ?? basename)'")
+                }
+            }
+        }
+    }
 
     private func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?, Bool) {
         switch event.hookEventName {

@@ -39,7 +39,7 @@ public struct ListCommand: ParsableCommand {
 
         for session in sessions {
             let symbol = session.status.symbol
-            print("\(symbol) \(session.projectName)")
+            print("\(symbol) \(session.displayName)")
 
             if withTmux {
                 // Show detailed info for remote access
@@ -92,7 +92,7 @@ public struct ListCommand: ParsableCommand {
         for session in slicedSessions {
             var item: [String: Any] = [
                 "id": session.id,
-                "project": session.projectName,
+                "project": session.displayName,
                 "status": session.status.rawValue,
                 "path": session.displayPath
             ]

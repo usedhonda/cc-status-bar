@@ -206,6 +206,9 @@ final class SessionObserver: ObservableObject {
             previousSessionIds = Set(loadedSessions.map { $0.id })
             previousSessionStatuses = Dictionary(uniqueKeysWithValues: loadedSessions.map { ($0.id, $0.status) })
             sessions = loadedSessions
+
+            // Check tmux session names for diagnostic warnings
+            DiagnosticsManager.shared.checkTmuxSessionNames(sessions: loadedSessions)
         } catch {
             sessions = []
             previousSessionIds = []

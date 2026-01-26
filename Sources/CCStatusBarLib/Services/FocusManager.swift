@@ -101,7 +101,7 @@ final class FocusManager {
                 let activated = app.activate(options: [.activateIgnoringOtherApps])
                 if activated {
                     DebugLog.log("[FocusManager] Activated editor by PID \(pid)")
-                    raiseWindowByProjectName(pid: pid, projectName: session.projectName)
+                    raiseWindowBySearchTerms(pid: pid, searchTerms: session.searchTerms)
                     return .success
                 }
             }
@@ -116,12 +116,12 @@ final class FocusManager {
         }
 
         // Try to find the app with matching project name in window title
-        if let (matchingApp, matchingWindow) = findAppWithProjectWindow(apps: apps, projectName: session.projectName) {
+        if let (matchingApp, matchingWindow) = findAppWithSearchTerms(apps: apps, searchTerms: session.searchTerms) {
             let activated = matchingApp.activate(options: [.activateIgnoringOtherApps])
             if activated {
                 // Raise the specific window (important for multi-window editors)
                 AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
-                DebugLog.log("[FocusManager] Activated editor with matching window title for '\(session.projectName)'")
+                DebugLog.log("[FocusManager] Activated editor with matching window title for '\(session.displayName)'")
                 return .success
             }
         }
@@ -137,23 +137,26 @@ final class FocusManager {
         }
     }
 
-    /// Raise window matching project name, or first window as fallback
-    private func raiseWindowByProjectName(pid: pid_t, projectName: String) {
+    /// Raise window matching search terms, or first window as fallback
+    /// Tries more specific terms first (parent/child) then falls back to basename
+    private func raiseWindowBySearchTerms(pid: pid_t, searchTerms: [String]) {
         let appElement = AXUIElementCreateApplication(pid)
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
               let windows = windowsRef as? [AXUIElement],
               !windows.isEmpty else { return }
 
-        // Search for window with matching project name in title
-        for window in windows {
-            var titleRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
-               let title = titleRef as? String,
-               title.lowercased().contains(projectName.lowercased()) {
-                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                DebugLog.log("[FocusManager] Raised window '\(title)' for project '\(projectName)'")
-                return
+        // Search for window with matching search terms in title (try more specific terms first)
+        for term in searchTerms {
+            for window in windows {
+                var titleRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+                   let title = titleRef as? String,
+                   title.lowercased().contains(term.lowercased()) {
+                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                    DebugLog.log("[FocusManager] Raised window '\(title)' for term '\(term)'")
+                    return
+                }
             }
         }
 
@@ -164,25 +167,29 @@ final class FocusManager {
         }
     }
 
-    /// Find the app and window containing the project name
-    private func findAppWithProjectWindow(apps: [NSRunningApplication], projectName: String) -> (NSRunningApplication, AXUIElement)? {
-        for app in apps {
-            let pid = app.processIdentifier
-            let appElement = AXUIElementCreateApplication(pid)
+    /// Find the app and window containing any of the search terms
+    /// Tries more specific terms first (parent/child) then falls back to basename
+    private func findAppWithSearchTerms(apps: [NSRunningApplication], searchTerms: [String]) -> (NSRunningApplication, AXUIElement)? {
+        // Try each search term in order (more specific first)
+        for term in searchTerms {
+            for app in apps {
+                let pid = app.processIdentifier
+                let appElement = AXUIElementCreateApplication(pid)
 
-            var windowsRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-                  let windows = windowsRef as? [AXUIElement] else {
-                continue
-            }
+                var windowsRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                      let windows = windowsRef as? [AXUIElement] else {
+                    continue
+                }
 
-            for window in windows {
-                var titleRef: CFTypeRef?
-                if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
-                   let title = titleRef as? String,
-                   title.lowercased().contains(projectName.lowercased()) {
-                    DebugLog.log("[FocusManager] Found matching window '\(title)' for project '\(projectName)'")
-                    return (app, window)
+                for window in windows {
+                    var titleRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+                       let title = titleRef as? String,
+                       title.lowercased().contains(term.lowercased()) {
+                        DebugLog.log("[FocusManager] Found matching window '\(title)' for term '\(term)'")
+                        return (app, window)
+                    }
                 }
             }
         }

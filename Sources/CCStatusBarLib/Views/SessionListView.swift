@@ -63,7 +63,7 @@ struct SessionRowView: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.projectName)
+                Text(session.displayName)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
 
