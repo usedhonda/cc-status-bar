@@ -754,3 +754,77 @@ Each theme shows 4 color preview dots (●●●●) before the theme name in th
 - **Property**: `colorTheme`
 - **File**: `Sources/App/AppDelegate.swift`
 - **Methods**: `updateStatusTitle()`, `createSessionMenuItem(_:)`, `createColorThemeMenu()`, `setColorTheme(_:)`
+
+---
+
+## 20. iOS Remote Monitoring
+
+### 20.1 Purpose
+
+Enable monitoring and focusing Claude Code sessions from a mobile device via WebSocket connection.
+
+### 20.2 Connection Types
+
+| Type | Value | Description |
+|------|-------|-------------|
+| `localIP` | Local | Same WiFi network (192.168.x.x) |
+| `tailscaleIP` | TS IP | Tailscale IP address (100.x.x.x) |
+| `tailscaleHostname` | TS Host | Tailscale DNS hostname (machine.tailnet.ts.net) |
+
+### 20.3 Default Selection
+
+- If Tailscale is available: `tailscaleHostname`
+- Otherwise: `localIP`
+
+### 20.4 Tailscale Detection
+
+Uses Tailscale CLI to detect connection status:
+
+```bash
+tailscale status --json
+```
+
+Searches for CLI in:
+1. `/usr/local/bin/tailscale`
+2. `/opt/homebrew/bin/tailscale`
+3. `/Applications/Tailscale.app/Contents/MacOS/Tailscale`
+
+### 20.5 Connection URL Format
+
+```
+vibeterm://connect?host={host}&port={api_port}&user={username}&api_port={api_port}
+```
+
+### 20.6 Implementation
+
+- **File**: `Sources/Services/NetworkHelper.swift`
+- **Struct**: `TailscaleStatus`
+- **Enum**: `ConnectionHost`
+- **Methods**: `getTailscaleStatus()`, `generateConnectionURL(hostType:tailscaleStatus:)`
+- **File**: `Sources/Views/ConnectionSetupWindow.swift`
+- **Struct**: `ConnectionSetupView`
+
+---
+
+## 21. Session List Window (Pin as Window)
+
+### 21.1 Purpose
+
+Floating window showing session list, independent of menu bar, always visible.
+
+### 21.2 View Update
+
+ForEach uses compound ID to force re-render on session changes:
+
+```swift
+ForEach(observer.sessions) { session in
+    PinnedSessionRowView(session: session, observer: observer)
+        .id("\(session.id)-\(session.updatedAt.timeIntervalSince1970)-\(session.status)")
+}
+```
+
+### 21.3 Implementation
+
+- **File**: `Sources/Views/SessionListWindow.swift`
+- **Class**: `SessionListWindowController`
+- **Struct**: `SessionListWindowView`, `PinnedSessionRowView`
