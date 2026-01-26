@@ -162,6 +162,13 @@ enum TmuxHelper {
         return getSessionAttachStates()[sessionName] ?? false
     }
 
+    /// List all tmux session names
+    /// - Returns: Array of session names, or nil if tmux is not running
+    static func listSessions() -> [String]? {
+        let states = getSessionAttachStates()
+        return states.isEmpty ? nil : Array(states.keys).sorted()
+    }
+
     /// Run a tmux command and return output
     static func runTmuxCommand(_ args: String...) -> String {
         return runCommand(tmuxPath, args)

@@ -99,12 +99,23 @@ final class GhosttyController: TerminalController {
         // 4. Last resort: just activate Ghostty
         activate()
 
-        // Return appropriate result
+        // Return appropriate result and record failure for diagnostics
+        let reason: String
         if hasTmux {
-            return .partialSuccess(reason: "tmux pane selected, but tab not found")
+            reason = "tmux pane selected, but tab not found"
+        } else {
+            reason = "Ghostty activated, tab '\(projectName)' not found"
         }
 
-        return .partialSuccess(reason: "Ghostty activated, tab '\(projectName)' not found")
+        // Record focus failure for diagnostics
+        Task { @MainActor in
+            DiagnosticsManager.shared.recordFocusFailure(
+                projectName: projectName,
+                reason: reason
+            )
+        }
+
+        return .partialSuccess(reason: reason)
     }
 
     @discardableResult

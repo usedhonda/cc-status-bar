@@ -249,14 +249,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             emptyItem.isEnabled = false
             menu.addItem(emptyItem)
         } else {
-            // Header
-            let header = NSMenuItem(
-                title: "Sessions (\(sessionObserver.sessions.count))",
-                action: nil,
+            // Pin as Window option
+            let pinItem = NSMenuItem(
+                title: "Pin as Window",
+                action: #selector(pinSessionList),
                 keyEquivalent: ""
             )
-            header.isEnabled = false
-            menu.addItem(header)
+            pinItem.target = self
+            menu.addItem(pinItem)
+
             menu.addItem(NSMenuItem.separator())
 
             // Session list
@@ -272,13 +273,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsItem.submenu = createSettingsMenu()
         menu.addItem(settingsItem)
 
-        // Copy Diagnostics
-        let diagnosticsItem = NSMenuItem(
-            title: "Copy Diagnostics",
-            action: #selector(copyDiagnostics),
-            keyEquivalent: ""
-        )
+        // Diagnostics (with warning indicator if issues exist)
+        let diagnosticsItem = NSMenuItem(title: "", action: #selector(showDiagnostics), keyEquivalent: "")
         diagnosticsItem.target = self
+        diagnosticsItem.attributedTitle = createDiagnosticsMenuTitle()
         menu.addItem(diagnosticsItem)
 
         menu.addItem(NSMenuItem(
@@ -305,10 +303,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isMenuOpen = false
     }
 
-    @objc private func copyDiagnostics() {
-        let diagnostics = DebugLog.collectDiagnostics()
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(diagnostics, forType: .string)
+    @objc private func showDiagnostics() {
+        DiagnosticsWindowController.shared.showWindow()
+    }
+
+    @MainActor @objc private func pinSessionList() {
+        SessionListWindowController.shared.showWindow(observer: sessionObserver)
+    }
+
+    /// Create attributed title for Diagnostics menu item with warning indicator
+    @MainActor
+    private func createDiagnosticsMenuTitle() -> NSAttributedString {
+        let attributed = NSMutableAttributedString()
+
+        let manager = DiagnosticsManager.shared
+        if manager.hasErrors {
+            attributed.append(NSAttributedString(
+                string: "● ",
+                attributes: [.foregroundColor: NSColor.systemRed]
+            ))
+        } else if manager.hasWarnings {
+            attributed.append(NSAttributedString(
+                string: "● ",
+                attributes: [.foregroundColor: NSColor.systemOrange]
+            ))
+        }
+
+        attributed.append(NSAttributedString(string: "Diagnostics..."))
+        return attributed
     }
 
     // MARK: - Settings Menu
@@ -678,7 +700,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let secondaryTextColor: NSColor = isTmuxDetached ? .quaternaryLabelColor : .secondaryLabelColor
 
         let nameAttr = NSAttributedString(
-            string: session.projectName,
+            string: session.displayName,
             attributes: [
                 .foregroundColor: primaryTextColor,
                 .font: NSFont.boldSystemFont(ofSize: 14)
@@ -860,7 +882,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showBindingAlert(for session: Session, tabIndex: Int) {
         let alert = NSAlert()
         alert.messageText = "Bind Tab?"
-        alert.informativeText = "Tab for '\(session.projectName)' was not found automatically.\n\nIs this the correct tab? Binding it will help focus this session in the future."
+        alert.informativeText = "Tab for '\(session.displayName)' was not found automatically.\n\nIs this the correct tab? Binding it will help focus this session in the future."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Bind This Tab")
         alert.addButton(withTitle: "Not Now")
