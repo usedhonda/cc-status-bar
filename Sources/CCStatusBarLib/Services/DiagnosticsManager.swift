@@ -164,6 +164,9 @@ final class DiagnosticsManager: ObservableObject {
     /// Maximum number of focus failures to track
     private let maxFocusFailures = 10
 
+    /// Cached sessions for diagnostics (updated by checkTmuxSessionNames)
+    private var cachedSessions: [Session] = []
+
     private init() {}
 
     // MARK: - Public API
@@ -195,6 +198,9 @@ final class DiagnosticsManager: ObservableObject {
 
         // Check hooks configuration
         checkHooksConfiguration(&newIssues)
+
+        // Check tmux session names for numeric-only names
+        addTmuxSessionNameIssues(sessions: cachedSessions, to: &newIssues)
 
         // Add any recorded focus failures
         for (projectName, failure) in focusFailures {
@@ -230,15 +236,23 @@ final class DiagnosticsManager: ObservableObject {
         focusFailures.removeValue(forKey: projectName)
     }
 
-    /// Check tmux session names for numeric-only names
+    /// Check tmux session names for numeric-only names (called from SessionObserver polling)
     func checkTmuxSessionNames(sessions: [Session]) {
+        // Cache sessions for use in runDiagnostics()
+        cachedSessions = sessions
+
         // Remove existing tmux name issues
         issues.removeAll { issue in
             if case .tmuxDefaultName = issue { return true }
             return false
         }
 
-        // Check each session
+        // Add tmux issues
+        addTmuxSessionNameIssues(sessions: sessions, to: &issues)
+    }
+
+    /// Add tmux session name issues to the given array
+    private func addTmuxSessionNameIssues(sessions: [Session], to issues: inout [DiagnosticIssue]) {
         for session in sessions {
             guard let tty = session.tty,
                   let paneInfo = TmuxHelper.getPaneInfo(for: tty) else {

@@ -303,7 +303,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isMenuOpen = false
     }
 
-    @objc private func showDiagnostics() {
+    @MainActor @objc private func showDiagnostics() {
         DiagnosticsWindowController.shared.showWindow()
     }
 
@@ -475,11 +475,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         let currentTimeout = AppSettings.sessionTimeoutMinutes
         let options: [(String, Int)] = [
-            ("15 minutes", 15),
-            ("30 minutes", 30),
             ("1 hour", 60),
             ("3 hours", 180),
             ("6 hours", 360),
+            ("12 hours", 720),
+            ("24 hours", 1440),
             ("Never", 0)
         ]
 

@@ -210,6 +210,7 @@ struct IssueCard: View {
 // MARK: - Window Controller
 
 /// Controller for managing the diagnostics window
+@MainActor
 final class DiagnosticsWindowController {
     static let shared = DiagnosticsWindowController()
 

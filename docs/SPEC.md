@@ -133,11 +133,11 @@ When user focuses a terminal with a waiting session, mark it as "acknowledged" s
 
 | Label | Value (minutes) |
 |-------|-----------------|
-| 15 minutes | 15 |
-| 30 minutes | 30 |
 | 1 hour | 60 |
 | 3 hours | 180 |
 | 6 hours | 360 |
+| 12 hours | 720 |
+| 24 hours | 1440 |
 | Never | 0 |
 
 ### 4.2 Default Value
@@ -188,11 +188,11 @@ Settings >
 ├── Launch at Login (toggle)
 ├── Notifications (toggle)
 ├── Session Timeout >
-│   ├── 15 minutes
-│   ├── 30 minutes
 │   ├── 1 hour ← default
 │   ├── 3 hours
 │   ├── 6 hours
+│   ├── 12 hours
+│   ├── 24 hours
 │   └── Never
 ├── Global Hotkey (toggle) ← shows ⌘⇧C when enabled
 ├── Web Server (toggle) ← shows port when enabled
