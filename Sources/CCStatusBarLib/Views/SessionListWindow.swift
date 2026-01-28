@@ -69,7 +69,11 @@ final class SessionListWindowController {
         let headerPadding: CGFloat = 24
         let contentHeight = CGFloat(max(sessionCount, 1)) * rowHeight + headerPadding
         let minHeight: CGFloat = 100
-        let maxHeight: CGFloat = 600
+
+        // Use 90% of screen's visible height as maximum
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        let maxHeight = screenHeight * 0.9
+
         return min(max(contentHeight, minHeight), maxHeight)
     }
 }
@@ -180,7 +184,7 @@ struct PinnedSessionRowView: View {
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(isHovered
-                    ? Color(white: 0.22)
+                    ? Color(white: 0.28)
                     : Color(white: 0.18))
         )
         .overlay(
@@ -193,6 +197,11 @@ struct PinnedSessionRowView: View {
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
             }
         }
         .onTapGesture {
