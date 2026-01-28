@@ -2,6 +2,10 @@ import XCTest
 @testable import CCStatusBarLib
 
 final class AppSettingsTests: XCTestCase {
+    // Use the same suite as AppSettings
+    private static let bundleID = "com.ccstatusbar.app"
+    private var defaults: UserDefaults { UserDefaults(suiteName: Self.bundleID) ?? UserDefaults.standard }
+
     // Store original values to restore after tests
     private var originalColorTheme: String?
     private var originalTimeout: Int?
@@ -9,22 +13,22 @@ final class AppSettingsTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Save original values
-        originalColorTheme = UserDefaults.standard.string(forKey: "colorTheme")
-        originalTimeout = UserDefaults.standard.object(forKey: "sessionTimeoutMinutes") as? Int
+        originalColorTheme = defaults.string(forKey: "colorTheme")
+        originalTimeout = defaults.object(forKey: "sessionTimeoutMinutes") as? Int
     }
 
     override func tearDown() {
         // Restore original values
         if let original = originalColorTheme {
-            UserDefaults.standard.set(original, forKey: "colorTheme")
+            defaults.set(original, forKey: "colorTheme")
         } else {
-            UserDefaults.standard.removeObject(forKey: "colorTheme")
+            defaults.removeObject(forKey: "colorTheme")
         }
 
         if let original = originalTimeout {
-            UserDefaults.standard.set(original, forKey: "sessionTimeoutMinutes")
+            defaults.set(original, forKey: "sessionTimeoutMinutes")
         } else {
-            UserDefaults.standard.removeObject(forKey: "sessionTimeoutMinutes")
+            defaults.removeObject(forKey: "sessionTimeoutMinutes")
         }
 
         super.tearDown()
@@ -33,7 +37,7 @@ final class AppSettingsTests: XCTestCase {
     // MARK: - Color Theme Tests
 
     func testColorThemeDefaultValue() {
-        UserDefaults.standard.removeObject(forKey: "colorTheme")
+        defaults.removeObject(forKey: "colorTheme")
         XCTAssertEqual(AppSettings.colorTheme, .vibrant)
     }
 
@@ -52,14 +56,14 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testColorThemeInvalidRawValueFallsBackToVibrant() {
-        UserDefaults.standard.set("invalid_theme", forKey: "colorTheme")
+        defaults.set("invalid_theme", forKey: "colorTheme")
         XCTAssertEqual(AppSettings.colorTheme, .vibrant)
     }
 
     // MARK: - Session Timeout Tests
 
     func testSessionTimeoutDefaultValue() {
-        UserDefaults.standard.removeObject(forKey: "sessionTimeoutMinutes")
+        defaults.removeObject(forKey: "sessionTimeoutMinutes")
         XCTAssertEqual(AppSettings.sessionTimeoutMinutes, 60)
     }
 
