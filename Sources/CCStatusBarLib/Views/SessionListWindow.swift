@@ -23,22 +23,20 @@ final class SessionListWindowController {
             let hostingController = NSHostingController(rootView: view)
 
             let newPanel = NSPanel(contentViewController: hostingController)
-            newPanel.title = "Sessions"
-            newPanel.styleMask = [.titled, .closable, .utilityWindow, .nonactivatingPanel]
+            newPanel.styleMask = [.borderless, .resizable, .utilityWindow, .nonactivatingPanel]
             newPanel.level = .floating
             newPanel.hidesOnDeactivate = false
             newPanel.isMovableByWindowBackground = true
-            newPanel.backgroundColor = NSColor(calibratedWhite: 0.1, alpha: 0.95)
-
-            // Dark titlebar
-            newPanel.titlebarAppearsTransparent = true
-            newPanel.titleVisibility = .hidden
+            newPanel.isOpaque = false
+            newPanel.backgroundColor = .clear
 
             // Dynamic height based on session count
             let sessionCount = observer.sessions.count
             let height = Self.calculateWindowHeight(sessionCount: sessionCount)
-            newPanel.setContentSize(NSSize(width: 260, height: height))
-            newPanel.minSize = NSSize(width: 240, height: 100)
+            let fixedWidth: CGFloat = 260
+            newPanel.setContentSize(NSSize(width: fixedWidth, height: height))
+            newPanel.minSize = NSSize(width: fixedWidth, height: 100)
+            newPanel.maxSize = NSSize(width: fixedWidth, height: CGFloat.greatestFiniteMagnitude)
             newPanel.setFrameAutosaveName("SessionListWindow")
 
             panel = newPanel
@@ -64,9 +62,9 @@ final class SessionListWindowController {
 
     private static func calculateWindowHeight(sessionCount: Int) -> CGFloat {
         // Row height: 10 padding + ~58 content + 10 padding = 78
-        // Header/footer padding: 12 * 2 = 24
+        // Header/footer padding: top 10 + bottom 10 = 20 (no titlebar)
         let rowHeight: CGFloat = 78
-        let headerPadding: CGFloat = 24
+        let headerPadding: CGFloat = 20
         let contentHeight = CGFloat(max(sessionCount, 1)) * rowHeight + headerPadding
         let minHeight: CGFloat = 100
 
@@ -103,11 +101,13 @@ struct SessionListWindowView: View {
                                 .id("\(session.id)-\(session.updatedAt.timeIntervalSince1970)-\(session.status)")
                         }
                     }
-                    .padding(6)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 10)
                 }
             }
         }
-        .background(Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1.0)))
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 0.95)))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onChange(of: observer.sessions.count) { newCount in
             SessionListWindowController.shared.updateWindowSize(sessionCount: newCount)
         }
