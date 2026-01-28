@@ -249,13 +249,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             emptyItem.isEnabled = false
             menu.addItem(emptyItem)
         } else {
-            // Pin as Window option
+            // Pin as Window option (with state indicator)
             let pinItem = NSMenuItem(
                 title: "Pin as Window",
                 action: #selector(pinSessionList),
                 keyEquivalent: ""
             )
             pinItem.target = self
+            pinItem.state = SessionListWindowController.shared.isVisible ? .on : .off
             menu.addItem(pinItem)
 
             menu.addItem(NSMenuItem.separator())
@@ -308,7 +309,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor @objc private func pinSessionList() {
-        SessionListWindowController.shared.showWindow(observer: sessionObserver)
+        let controller = SessionListWindowController.shared
+        if controller.isVisible {
+            controller.closeWindow()
+        } else {
+            controller.showWindow(observer: sessionObserver)
+        }
     }
 
     /// Create attributed title for Diagnostics menu item with warning indicator
