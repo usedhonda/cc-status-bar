@@ -175,8 +175,7 @@ final class IconManager {
         // Method 1: NSWorkspace.urlForApplication (preferred, more reliable)
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             let icon = NSWorkspace.shared.icon(forFile: appURL.path)
-            icon.size = NSSize(width: size, height: size)
-            return icon
+            return resizedIcon(icon, to: size)
         }
 
         // Method 2: LSCopyApplicationURLsForBundleIdentifier (fallback)
@@ -187,10 +186,22 @@ final class IconManager {
         )?.takeRetainedValue() as? [URL],
            let appURL = appURLs.first {
             let icon = NSWorkspace.shared.icon(forFile: appURL.path)
-            icon.size = NSSize(width: size, height: size)
-            return icon
+            return resizedIcon(icon, to: size)
         }
 
         return nil
+    }
+
+    /// Resize an image to the specified size (actual pixel resize, not just logical size)
+    private func resizedIcon(_ image: NSImage, to size: CGFloat) -> NSImage {
+        let newSize = NSSize(width: size, height: size)
+        let resizedImage = NSImage(size: newSize)
+        resizedImage.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize),
+                   from: NSRect(origin: .zero, size: image.size),
+                   operation: .copy,
+                   fraction: 1.0)
+        resizedImage.unlockFocus()
+        return resizedImage
     }
 }
