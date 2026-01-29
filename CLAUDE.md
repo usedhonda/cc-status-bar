@@ -6,7 +6,7 @@
 
 | Task | Required Files |
 |------|----------------|
-| Release | `.local/release.md` |
+| Release | `scripts/release.sh` (実行), `.local/release.md` (参照のみ) |
 | New Feature | `docs/SPEC.md`, `README.md` |
 | Bug Fix | `~/Library/Logs/CCStatusBar/debug.log` |
 | Design Decision | `docs/ask/` (past AI discussions) |
@@ -199,9 +199,22 @@ if waitingCount > 0 {
 - Settings: `~/.claude/settings.json`
 - Logs: `~/Library/Logs/CCStatusBar/debug.log`
 
-## Release
+## Release (MANDATORY)
 
-Release procedure is documented in `.local/release.md` (local only, not committed).
+### ⚠️ CRITICAL: Always use the release script
+
+```bash
+# ✅ CORRECT: Use the release script
+./scripts/release.sh
+
+# ❌ WRONG: Manual commands (hdiutil, codesign, notarytool, etc.)
+```
+
+**Rules:**
+1. **ALWAYS use `./scripts/release.sh`** - never execute release commands manually
+2. `.local/release.md` is for **reference only** (credentials, troubleshooting)
+3. Manual commands lead to permission errors and inconsistent builds
+4. The script handles: build, sign, DMG, notarize, staple, Stream Deck plugin
 
 **Important**: When icons or screenshots are updated, a new release must be created.
 
