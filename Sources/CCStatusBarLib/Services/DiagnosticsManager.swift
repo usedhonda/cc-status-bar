@@ -65,6 +65,7 @@ enum DiagnosticIssue: Identifiable {
         case .focusFailed(let projectName, let reason, let timestamp):
             let formatter = RelativeDateTimeFormatter()
             formatter.unitsStyle = .full
+            formatter.locale = Locale(identifier: "en_US")
             let timeAgo = formatter.localizedString(for: timestamp, relativeTo: Date())
             return """
             Project: \(projectName)
