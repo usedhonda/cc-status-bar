@@ -189,13 +189,11 @@ final class WebSocketManager {
         // Detect added Codex sessions
         for (cwd, codexSession) in currentCodexSessions {
             if !previousCodexCwds.contains(cwd) {
-                let isNewType = !knownTerminalTypes.contains("Codex")
-                var icon: String? = nil
-                if isNewType {
+                if !knownTerminalTypes.contains("Codex") {
                     knownTerminalTypes.insert("Codex")
-                    // Codex doesn't have a specific icon yet, use nil
                 }
-                let event = WebSocketEvent(type: .sessionAdded, session: codexSessionToDict(codexSession), icon: icon)
+                // Codex doesn't have a specific icon yet (icon: nil)
+                let event = WebSocketEvent(type: .sessionAdded, session: codexSessionToDict(codexSession))
                 broadcast(event: event)
             }
         }
@@ -262,7 +260,8 @@ final class WebSocketManager {
             "cwd": session.cwd,
             "status": "running",  // Codex is always running if detected
             "started_at": ISO8601DateFormatter().string(from: session.startedAt),
-            "attention_level": 0  // Always green for running
+            "attention_level": 0,  // Always green for running
+            "terminal": "Codex"  // For icon lookup
         ]
 
         if let sessionId = session.sessionId {
