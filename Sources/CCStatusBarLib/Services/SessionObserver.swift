@@ -136,8 +136,9 @@ final class SessionObserver: ObservableObject {
     // MARK: - File Reading
 
     private func loadSessions() {
-        // Invalidate TmuxHelper cache when session file changes
+        // Invalidate TmuxHelper and CodexObserver caches when session file changes
         TmuxHelper.invalidatePaneInfoCache()
+        CodexObserver.invalidateCache()
 
         guard FileManager.default.fileExists(atPath: storeFile.path) else {
             sessions = []
