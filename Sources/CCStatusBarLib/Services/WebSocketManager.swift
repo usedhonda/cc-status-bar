@@ -212,6 +212,21 @@ final class WebSocketManager {
             ]
         }
 
+        // Add Codex info if available (matched by cwd)
+        if let codexInfo = CodexObserver.getCodexInfo(for: session.cwd) {
+            var codexDict: [String: Any] = [
+                "pid": codexInfo.pid,
+                "is_active": codexInfo.isActive
+            ]
+            if let startedAt = codexInfo.startedAt {
+                codexDict["started_at"] = ISO8601DateFormatter().string(from: startedAt)
+            }
+            if let sessionId = codexInfo.sessionId {
+                codexDict["session_id"] = sessionId
+            }
+            dict["codex"] = codexDict
+        }
+
         return dict
     }
 
