@@ -152,8 +152,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
 
-        let attributed = NSMutableAttributedString()
-
         let redCount = sessionObserver.unacknowledgedRedCount
         let yellowCount = sessionObserver.unacknowledgedYellowCount
         let greenCount = sessionObserver.displayedGreenCount
@@ -172,57 +170,67 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ccColor = theme.whiteColor
         }
 
-        // No spinner in menu bar - just static "CC"
+        // Build count text (e.g., "1/5", "3", "")
+        let countText = buildCountText(red: redCount, yellow: yellowCount, green: greenCount, total: totalCount)
 
-        // "CC" with color
-        let ccAttr = NSAttributedString(
-            string: "CC",
-            attributes: [
+        // Generate 2-row status icon
+        button.image = createStatusIcon(ccColor: ccColor, countText: countText, theme: theme)
+        button.title = ""  // Text is rendered in the image
+    }
+
+    /// Build count text for status icon (e.g., "1/5", "3")
+    private func buildCountText(red: Int, yellow: Int, green: Int, total: Int) -> String {
+        if red > 0 {
+            return (yellow + green > 0) ? "\(red)/\(total)" : "\(red)"
+        } else if yellow > 0 {
+            return (green > 0) ? "\(yellow)/\(total)" : "\(yellow)"
+        } else if green > 0 {
+            return "\(green)"
+        }
+        return ""
+    }
+
+    /// Generate 2-row status icon dynamically
+    /// Layout: "CC" on top (colored), count on bottom (white)
+    private func createStatusIcon(ccColor: NSColor, countText: String, theme: ColorTheme) -> NSImage {
+        // Menu bar height is 22pt, width is variable based on content
+        let height: CGFloat = 22
+        let width: CGFloat = 32  // Enough for 2-3 characters
+        let size = NSSize(width: width, height: height)
+
+        let image = NSImage(size: size, flipped: false) { rect in
+            // Row 1: "CC" (colored)
+            let ccFont = NSFont.systemFont(ofSize: 10, weight: .bold)
+            let ccAttrs: [NSAttributedString.Key: Any] = [
                 .foregroundColor: ccColor,
-                .font: NSFont.systemFont(ofSize: 13, weight: .bold)
+                .font: ccFont
             ]
-        )
-        attributed.append(ccAttr)
+            let ccString = NSAttributedString(string: "CC", attributes: ccAttrs)
+            let ccSize = ccString.size()
+            let ccX = (rect.width - ccSize.width) / 2
+            let ccY = rect.height - ccSize.height - 1  // Position at top
+            ccString.draw(at: NSPoint(x: ccX, y: ccY))
 
-        // Count display format
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            // Row 2: count (white)
+            if !countText.isEmpty {
+                let countFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
+                let countAttrs: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: NSColor.white,
+                    .font: countFont
+                ]
+                let countString = NSAttributedString(string: countText, attributes: countAttrs)
+                let countSize = countString.size()
+                let countX = (rect.width - countSize.width) / 2
+                let countY: CGFloat = 1  // Position at bottom
+                countString.draw(at: NSPoint(x: countX, y: countY))
+            }
 
-        if redCount > 0 {
-            // Red exists: " 1/5" (red count in red, /total in white)
-            attributed.append(NSAttributedString(string: " "))
-            attributed.append(NSAttributedString(
-                string: "\(redCount)",
-                attributes: [.foregroundColor: theme.redColor, .font: font]
-            ))
-            if yellowCount + greenCount > 0 {
-                attributed.append(NSAttributedString(
-                    string: "/\(totalCount)",
-                    attributes: [.foregroundColor: theme.whiteColor, .font: font]
-                ))
-            }
-        } else if yellowCount > 0 {
-            // No red, yellow exists: " 2/5" (yellow count in yellow, /total in white)
-            attributed.append(NSAttributedString(string: " "))
-            attributed.append(NSAttributedString(
-                string: "\(yellowCount)",
-                attributes: [.foregroundColor: theme.yellowColor, .font: font]
-            ))
-            if greenCount > 0 {
-                attributed.append(NSAttributedString(
-                    string: "/\(totalCount)",
-                    attributes: [.foregroundColor: theme.whiteColor, .font: font]
-                ))
-            }
-        } else if greenCount > 0 {
-            // Green only: " 3" (white)
-            let countAttr = NSAttributedString(
-                string: " \(greenCount)",
-                attributes: [.foregroundColor: NSColor.white, .font: font]
-            )
-            attributed.append(countAttr)
+            return true
         }
 
-        button.attributedTitle = attributed
+        // Do NOT mark as template - we need custom colors
+        image.isTemplate = false
+        return image
     }
 
     /// Unified UI refresh - ensures status title and menu stay in sync
