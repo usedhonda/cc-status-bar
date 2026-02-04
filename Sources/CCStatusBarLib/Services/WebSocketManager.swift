@@ -73,6 +73,7 @@ final class WebSocketManager {
     private let clientQueue = DispatchQueue(label: "com.ccstatusbar.websocket.clients")
 
     private var previousSessions: [String: Session] = [:]
+    private var previousCodexCwds = Set<String>()  // Track Codex sessions by cwd
     private var knownTerminalTypes = Set<String>()
     private var cancellables = Set<AnyCancellable>()
 
@@ -87,10 +88,14 @@ final class WebSocketManager {
         }
         DebugLog.log("[WebSocketManager] Client connected (total: \(connectedClients.count))")
 
-        // Send initial session list with icons
-        let sessions = SessionStore.shared.getSessions()
-        let sessionsData = sessions.map { sessionToDict($0) }
-        let icons = generateIcons(for: sessions)
+        // Send initial session list with icons (both Claude Code and Codex)
+        let claudeSessions = SessionStore.shared.getSessions()
+        let codexSessions = CodexObserver.getActiveSessions()
+
+        var sessionsData = claudeSessions.map { claudeSessionToDict($0) }
+        sessionsData += codexSessions.values.map { codexSessionToDict($0) }
+
+        let icons = generateIcons(claudeSessions: claudeSessions, codexSessions: Array(codexSessions.values))
         let event = WebSocketEvent(type: .sessionsList, sessions: sessionsData, icons: icons)
         sendToClient(session, event: event)
     }
@@ -138,6 +143,8 @@ final class WebSocketManager {
     private func handleSessionsChanged(_ sessions: [Session]) {
         let currentSessionsById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
 
+        // --- Claude Code sessions ---
+
         // Detect added sessions
         for session in sessions {
             if previousSessions[session.id] == nil {
@@ -152,7 +159,7 @@ final class WebSocketManager {
                     icon = IconManager.shared.iconBase64(for: env, size: 64)
                 }
 
-                let event = WebSocketEvent(type: .sessionAdded, session: sessionToDict(session), icon: icon)
+                let event = WebSocketEvent(type: .sessionAdded, session: claudeSessionToDict(session), icon: icon)
                 broadcast(event: event)
             }
         }
@@ -168,16 +175,44 @@ final class WebSocketManager {
         // Detect updated sessions
         for session in sessions {
             if let previous = previousSessions[session.id], session != previous {
-                let event = WebSocketEvent(type: .sessionUpdated, session: sessionToDict(session))
+                let event = WebSocketEvent(type: .sessionUpdated, session: claudeSessionToDict(session))
                 broadcast(event: event)
             }
         }
 
         previousSessions = currentSessionsById
+
+        // --- Codex sessions ---
+        let currentCodexSessions = CodexObserver.getActiveSessions()
+        let currentCodexCwds = Set(currentCodexSessions.keys)
+
+        // Detect added Codex sessions
+        for (cwd, codexSession) in currentCodexSessions {
+            if !previousCodexCwds.contains(cwd) {
+                if !knownTerminalTypes.contains("Codex") {
+                    knownTerminalTypes.insert("Codex")
+                }
+                // Codex doesn't have a specific icon yet (icon: nil)
+                let event = WebSocketEvent(type: .sessionAdded, session: codexSessionToDict(codexSession))
+                broadcast(event: event)
+            }
+        }
+
+        // Detect removed Codex sessions
+        for cwd in previousCodexCwds {
+            if !currentCodexCwds.contains(cwd) {
+                let event = WebSocketEvent(type: .sessionRemoved, sessionId: "codex:\(cwd)")
+                broadcast(event: event)
+            }
+        }
+
+        previousCodexCwds = currentCodexCwds
     }
 
-    private func sessionToDict(_ session: Session) -> [String: Any] {
+    /// Convert Claude Code session to dictionary for WebSocket output
+    private func claudeSessionToDict(_ session: Session) -> [String: Any] {
         var dict: [String: Any] = [
+            "type": "claude_code",
             "id": session.id,
             "session_id": session.sessionId,
             "project": session.projectName,
@@ -215,11 +250,33 @@ final class WebSocketManager {
         return dict
     }
 
+    /// Convert Codex session to dictionary for WebSocket output
+    private func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
+        var dict: [String: Any] = [
+            "type": "codex",
+            "id": "codex:\(session.cwd)",
+            "pid": session.pid,
+            "project": session.projectName,
+            "cwd": session.cwd,
+            "status": "running",  // Codex is always running if detected
+            "started_at": ISO8601DateFormatter().string(from: session.startedAt),
+            "attention_level": 0,  // Always green for running
+            "terminal": "Codex"  // For icon lookup
+        ]
+
+        if let sessionId = session.sessionId {
+            dict["session_id"] = sessionId
+        }
+
+        return dict
+    }
+
     /// Generate icons dictionary for all terminal types in sessions
-    private func generateIcons(for sessions: [Session]) -> [String: String] {
+    private func generateIcons(claudeSessions: [Session], codexSessions: [CodexSession]) -> [String: String] {
         var icons: [String: String] = [:]
 
-        for session in sessions {
+        // Claude Code session icons
+        for session in claudeSessions {
             let terminalName = session.environmentLabel
             if icons[terminalName] == nil {
                 let env = EnvironmentResolver.shared.resolve(session: session)
@@ -228,6 +285,12 @@ final class WebSocketManager {
                 }
                 knownTerminalTypes.insert(terminalName)
             }
+        }
+
+        // Codex icon (if any Codex sessions exist)
+        if !codexSessions.isEmpty && icons["Codex"] == nil {
+            // TODO: Add Codex icon when available
+            knownTerminalTypes.insert("Codex")
         }
 
         return icons
