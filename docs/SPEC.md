@@ -828,3 +828,56 @@ ForEach(observer.sessions) { session in
 - **File**: `Sources/Views/SessionListWindow.swift`
 - **Class**: `SessionListWindowController`
 - **Struct**: `SessionListWindowView`, `PinnedSessionRowView`
+
+---
+
+## 22. Session Display Mode
+
+### 22.1 Purpose
+
+Allow users to customize what is displayed as the session name in menu items and pinned window. Useful for tmux users who want to see window or session names instead of project directory names.
+
+### 22.2 Display Modes
+
+| Mode | Raw Value | Display |
+|------|-----------|---------|
+| Project Name | `project` | Directory basename from `cwd` |
+| tmux Window Name | `tmux_window` | `#{window_name}` from tmux |
+| tmux Session Name | `tmux_session` | `#{session_name}` from tmux |
+| tmux Session/Window | `tmux_sess_win` | `session:window` format |
+
+### 22.3 Fallback Behavior
+
+When tmux information is unavailable (session not in tmux, or tmux command fails), all modes fall back to Project Name display.
+
+### 22.4 Storage
+
+- **Key**: `sessionDisplayMode`
+- **Default**: `project`
+- **Location**: UserDefaults suite `com.ccstatusbar.app`
+
+### 22.5 UI Integration
+
+Menu structure:
+```
+Settings ▶
+  └ Session Display ▶
+      ├ ✓ Project Name
+      ├   tmux Window Name
+      ├   tmux Session Name
+      └   tmux Session/Window
+```
+
+### 22.6 Implementation
+
+- **File**: `Sources/Services/AppSettings.swift`
+- **Enum**: `SessionDisplayMode`
+- **Property**: `AppSettings.sessionDisplayMode`
+- **File**: `Sources/Services/TmuxHelper.swift`
+- **Struct**: `PaneInfo` (extended with `windowName`)
+- **File**: `Sources/App/AppDelegate.swift`
+- **Method**: `createSessionMenuItem(_:)`, `createSessionDisplayMenu()`
+- **File**: `Sources/Views/SessionListView.swift`
+- **Computed Property**: `SessionRowView.displayText`
+- **File**: `Sources/Views/SessionListWindow.swift`
+- **Computed Property**: `PinnedSessionRowView.displayText`
