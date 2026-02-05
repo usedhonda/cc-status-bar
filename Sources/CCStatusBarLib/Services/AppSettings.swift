@@ -1,5 +1,22 @@
 import Foundation
 
+/// Session display mode for menu items
+enum SessionDisplayMode: String, CaseIterable {
+    case projectName = "project"              // Project name (default)
+    case tmuxWindow = "tmux_window"           // tmux window name
+    case tmuxSession = "tmux_session"         // tmux session name
+    case tmuxSessionWindow = "tmux_sess_win"  // tmux session:window format
+
+    var label: String {
+        switch self {
+        case .projectName: return "Project Name"
+        case .tmuxWindow: return "tmux Window Name"
+        case .tmuxSession: return "tmux Session Name"
+        case .tmuxSessionWindow: return "tmux Session/Window"
+        }
+    }
+}
+
 enum AppSettings {
     private enum Keys {
         static let launchAtLogin = "launchAtLogin"
@@ -8,6 +25,7 @@ enum AppSettings {
         static let webServerEnabled = "webServerEnabled"
         static let webServerPort = "webServerPort"
         static let colorTheme = "colorTheme"
+        static let sessionDisplayMode = "sessionDisplayMode"
     }
 
     /// Bundle ID for shared UserDefaults access (CLI and GUI)
@@ -74,5 +92,13 @@ enum AppSettings {
             return ColorTheme(rawValue: raw) ?? .vibrant
         }
         set { defaults.set(newValue.rawValue, forKey: Keys.colorTheme) }
+    }
+
+    static var sessionDisplayMode: SessionDisplayMode {
+        get {
+            let raw = defaults.string(forKey: Keys.sessionDisplayMode) ?? "project"
+            return SessionDisplayMode(rawValue: raw) ?? .projectName
+        }
+        set { defaults.set(newValue.rawValue, forKey: Keys.sessionDisplayMode) }
     }
 }

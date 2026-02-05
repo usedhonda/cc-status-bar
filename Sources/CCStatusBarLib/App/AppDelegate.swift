@@ -394,6 +394,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         colorThemeItem.submenu = createColorThemeMenu()
         menu.addItem(colorThemeItem)
 
+        // Session Display submenu
+        let sessionDisplayItem = NSMenuItem(title: "Session Display", action: nil, keyEquivalent: "")
+        sessionDisplayItem.submenu = createSessionDisplayMenu()
+        menu.addItem(sessionDisplayItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // vibeterm (iOS app) submenu
@@ -598,6 +603,32 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshUI()
     }
 
+    private func createSessionDisplayMenu() -> NSMenu {
+        let menu = NSMenu()
+        let currentMode = AppSettings.sessionDisplayMode
+
+        for mode in SessionDisplayMode.allCases {
+            let item = NSMenuItem(
+                title: mode.label,
+                action: #selector(setSessionDisplayMode(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode
+            item.state = (currentMode == mode) ? .on : .off
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @MainActor @objc private func setSessionDisplayMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? SessionDisplayMode else { return }
+        AppSettings.sessionDisplayMode = mode
+        DebugLog.log("[AppDelegate] Session display mode set to: \(mode.label)")
+        refreshUI()
+    }
+
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
         do {
             let newState = !LaunchManager.isEnabled
@@ -661,11 +692,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ? .running  // Show as green if acknowledged
             : session.status
 
+        // Get pane info once and reuse for both isTmuxDetached and displayText
+        let paneInfo: TmuxHelper.PaneInfo? = session.tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
+
         // Check if tmux session is detached
-        var isTmuxDetached = false
-        if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-            isTmuxDetached = !TmuxHelper.isSessionAttached(paneInfo.session)
-        }
+        let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session) } ?? false
 
         // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
         let theme = AppSettings.colorTheme
@@ -713,8 +744,25 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let primaryTextColor: NSColor = isTmuxDetached ? .tertiaryLabelColor : .labelColor
         let secondaryTextColor: NSColor = isTmuxDetached ? .quaternaryLabelColor : .secondaryLabelColor
 
+        // Determine display text based on sessionDisplayMode setting (reuse paneInfo from above)
+        let displayText: String
+        switch AppSettings.sessionDisplayMode {
+        case .projectName:
+            displayText = session.displayName
+        case .tmuxWindow:
+            displayText = paneInfo?.windowName ?? session.displayName
+        case .tmuxSession:
+            displayText = paneInfo?.session ?? session.displayName
+        case .tmuxSessionWindow:
+            if let info = paneInfo {
+                displayText = "\(info.session):\(info.windowName)"
+            } else {
+                displayText = session.displayName
+            }
+        }
+
         let nameAttr = NSAttributedString(
-            string: session.displayName,
+            string: displayText,
             attributes: [
                 .foregroundColor: primaryTextColor,
                 .font: NSFont.boldSystemFont(ofSize: 14)

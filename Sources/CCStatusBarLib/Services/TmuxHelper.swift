@@ -5,6 +5,7 @@ enum TmuxHelper {
         let session: String
         let window: String
         let pane: String
+        let windowName: String  // tmux window name
     }
 
     // MARK: - Caching Infrastructure
@@ -71,14 +72,15 @@ enum TmuxHelper {
 
     /// Fetch pane info directly from tmux (no cache)
     private static func fetchPaneInfoFromTmux(_ tty: String) -> PaneInfo? {
+        // Use tab separator to handle window names containing "|"
         let output = runCommand(tmuxPath, ["list-panes", "-a",
-            "-F", "#{pane_tty}|#{session_name}|#{window_index}|#{pane_index}"])
+            "-F", "#{pane_tty}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}"])
 
         for line in output.split(separator: "\n") {
-            let parts = line.split(separator: "|").map(String.init)
-            if parts.count == 4 && parts[0] == tty {
-                DebugLog.log("[TmuxHelper] Found pane: \(parts[1]):\(parts[2]).\(parts[3]) for TTY \(tty)")
-                return PaneInfo(session: parts[1], window: parts[2], pane: parts[3])
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            if parts.count >= 5 && parts[0] == tty {
+                DebugLog.log("[TmuxHelper] Found pane: \(parts[1]):\(parts[2]).\(parts[3]) (window: \(parts[4])) for TTY \(tty)")
+                return PaneInfo(session: parts[1], window: parts[2], pane: parts[3], windowName: parts[4])
             }
         }
         DebugLog.log("[TmuxHelper] No pane found for TTY \(tty)")
