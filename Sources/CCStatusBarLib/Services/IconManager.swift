@@ -74,6 +74,21 @@ final class IconManager {
     /// - Returns: Base64 encoded PNG string or nil
     func iconBase64(for env: FocusEnvironment, size: CGFloat = 40) -> String? {
         guard let image = icon(for: env, size: size) else { return nil }
+        return imageToBase64(image, size: size)
+    }
+
+    /// Get terminal icon as base64 PNG data by terminal name
+    /// - Parameters:
+    ///   - terminal: Terminal identifier (ghostty, iTerm.app, apple_terminal)
+    ///   - size: Icon size (default 40x40)
+    /// - Returns: Base64 encoded PNG string or nil
+    func terminalIconBase64(for terminal: String, size: CGFloat = 40) -> String? {
+        guard let image = terminalIcon(for: terminal, size: size) else { return nil }
+        return imageToBase64(image, size: size)
+    }
+
+    /// Convert NSImage to base64 PNG string
+    private func imageToBase64(_ image: NSImage, size: CGFloat) -> String? {
 
         // Create a single bitmap at the specified size (avoid multi-resolution TIFF)
         let intSize = Int(size)
@@ -102,27 +117,30 @@ final class IconManager {
         return pngData.base64EncodedString()
     }
 
-    /// Get icon with tab number badge for a FocusEnvironment
+    /// Get icon with badge for a FocusEnvironment
     /// - Parameters:
     ///   - env: Focus environment
     ///   - size: Icon size (default 16x16)
-    /// - Returns: Application icon with badge (for Ghostty tabs) or regular icon
-    func iconWithBadge(for env: FocusEnvironment, size: CGFloat = 16) -> NSImage? {
+    ///   - badgeText: Custom badge text (e.g., "CC", "Codex"). If nil, falls back to tab number badge.
+    /// - Returns: Application icon with badge or regular icon
+    func iconWithBadge(for env: FocusEnvironment, size: CGFloat = 16, badgeText: String? = nil) -> NSImage? {
         guard let baseIcon = icon(for: env, size: size) else { return nil }
 
-        // Only add badge for Ghostty or iTerm2 with tab index
-        let tabIndex: Int
-        switch env {
-        case .ghostty(_, let idx?, _):
-            tabIndex = idx
-        case .iterm2(_, let idx?, _):
-            tabIndex = idx
-        default:
-            return baseIcon
+        // Determine badge text: explicit badgeText > tab number > no badge
+        let resolvedBadgeText: String
+        if let badgeText = badgeText {
+            resolvedBadgeText = badgeText
+        } else {
+            // Fallback to tab number badge for Ghostty/iTerm2
+            switch env {
+            case .ghostty(_, let idx?, _):
+                resolvedBadgeText = "⌘\(idx + 1)"
+            case .iterm2(_, let idx?, _):
+                resolvedBadgeText = "⌘\(idx + 1)"
+            default:
+                return baseIcon
+            }
         }
-
-        // 1-based display (tab 0 -> display "⌘1")
-        let badgeText = "⌘\(tabIndex + 1)"
 
         // Create new image with badge
         let newImage = NSImage(size: baseIcon.size)
@@ -131,11 +149,18 @@ final class IconManager {
         // Draw base icon
         baseIcon.draw(at: .zero, from: .zero, operation: .copy, fraction: 1.0)
 
-        // Badge configuration (bottom-right, rounded rectangle)
+        // Badge configuration (bottom-right, capsule)
         let badgeHeight = size * 0.32
-        let badgeWidth = badgeHeight * 1.65  // Wider for ⌘ symbol
-        let cornerRadius = badgeHeight * 0.35
-        // Position at bottom-right
+        let fontSize = badgeHeight * 0.75
+        let font = NSFont.boldSystemFont(ofSize: fontSize)
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white
+        ]
+        let textSize = resolvedBadgeText.size(withAttributes: textAttrs)
+        let horizontalPadding = badgeHeight * 0.4
+        let badgeWidth = max(badgeHeight * 1.65, textSize.width + horizontalPadding)
+        let cornerRadius = badgeHeight * 0.5
         let badgeRect = NSRect(
             x: size - badgeWidth,
             y: 0,
@@ -143,27 +168,40 @@ final class IconManager {
             height: badgeHeight
         )
 
-        // Draw badge background (white rounded rectangle with border)
+        // Draw shadow
+        let shadow = NSShadow()
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 2.0
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
+        shadow.set()
+
+        // Draw badge background (semi-transparent dark capsule)
         let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSColor.white.setFill()
+        NSColor(calibratedWhite: 0.15, alpha: 0.85).setFill()
         badgePath.fill()
-        NSColor.systemGray.setStroke()
-        badgePath.lineWidth = 0.5
+
+        // Remove shadow for border and text
+        NSShadow().set()
+
+        // Type-specific border color
+        let borderColor: NSColor
+        if resolvedBadgeText == "CC" {
+            borderColor = NSColor(calibratedRed: 0.3, green: 0.6, blue: 0.9, alpha: 0.8)
+        } else if resolvedBadgeText == "Cdx" {
+            borderColor = NSColor(calibratedRed: 0.7, green: 0.4, blue: 0.9, alpha: 0.8)
+        } else {
+            borderColor = NSColor(calibratedWhite: 0.5, alpha: 0.6)
+        }
+        borderColor.setStroke()
+        badgePath.lineWidth = 1.0
         badgePath.stroke()
 
-        // Draw badge text
-        let fontSize = badgeHeight * 0.88
-        let font = NSFont.boldSystemFont(ofSize: fontSize)
-        let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.darkGray
-        ]
-        let textSize = badgeText.size(withAttributes: textAttrs)
+        // Draw badge text (centered)
         let textPoint = NSPoint(
             x: badgeRect.midX - textSize.width / 2,
             y: badgeRect.midY - textSize.height / 2
         )
-        badgeText.draw(at: textPoint, withAttributes: textAttrs)
+        resolvedBadgeText.draw(at: textPoint, withAttributes: textAttrs)
 
         newImage.unlockFocus()
         return newImage
