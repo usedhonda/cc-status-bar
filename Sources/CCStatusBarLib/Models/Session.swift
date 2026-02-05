@@ -69,6 +69,25 @@ struct Session: Codable, Identifiable, Equatable {
         EnvironmentResolver.shared.resolve(session: self).displayName
     }
 
+    /// Display text based on session display mode setting
+    /// - Parameters:
+    ///   - mode: The session display mode
+    ///   - paneInfo: Optional pre-fetched pane info (avoids redundant lookups)
+    func displayText(for mode: SessionDisplayMode, paneInfo: TmuxHelper.PaneInfo? = nil) -> String {
+        let info = paneInfo ?? tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
+        switch mode {
+        case .projectName:
+            return displayName
+        case .tmuxWindow:
+            return info?.windowName ?? displayName
+        case .tmuxSession:
+            return info?.session ?? displayName
+        case .tmuxSessionWindow:
+            guard let info = info else { return displayName }
+            return "\(info.session):\(info.windowName)"
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd

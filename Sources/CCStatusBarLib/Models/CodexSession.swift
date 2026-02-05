@@ -43,6 +43,22 @@ struct CodexSession: Equatable {
 
 extension CodexSession: Identifiable {
     var id: String { cwd }
+
+    /// Display text based on session display mode setting
+    func displayText(for mode: SessionDisplayMode) -> String {
+        let paneInfo = tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
+        switch mode {
+        case .projectName:
+            return projectName
+        case .tmuxWindow:
+            return paneInfo?.windowName ?? projectName
+        case .tmuxSession:
+            return paneInfo?.session ?? projectName
+        case .tmuxSessionWindow:
+            guard let info = paneInfo else { return projectName }
+            return "\(info.session):\(info.windowName)"
+        }
+    }
 }
 
 /// Information about Codex session for WebSocket output

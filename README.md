@@ -31,6 +31,18 @@ When triggered:
 2. If no waiting sessions, focuses the most recent session
 3. If no sessions, opens the menu
 
+### Session Display Mode
+Customize what is shown as the session name in the menu. Access via **Settings → Session Display**:
+
+| Mode | Display |
+|------|---------|
+| **Project Name** (default) | Directory name (e.g., `cc-status-bar`) |
+| **tmux Window Name** | Current tmux window name (e.g., `vim`) |
+| **tmux Session Name** | tmux session name (e.g., `main`) |
+| **tmux Session/Window** | Combined format (e.g., `main:vim`) |
+
+Applies to both Claude Code and Codex sessions. When not running in tmux, all modes fall back to Project Name.
+
 ### Notification Actions
 When a session needs attention, notifications include a **Focus Terminal** button for instant access.
 

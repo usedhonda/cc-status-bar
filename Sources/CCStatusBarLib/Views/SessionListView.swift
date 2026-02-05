@@ -56,6 +56,16 @@ struct SessionListView: View {
 struct SessionRowView: View {
     let session: Session
 
+    // Watch for sessionDisplayMode changes to trigger re-render
+    @AppStorage("sessionDisplayMode", store: UserDefaults(suiteName: "com.ccstatusbar.app"))
+    private var displayModeRaw: String = "project"
+
+    /// Computed display text based on sessionDisplayMode setting
+    private var displayText: String {
+        let mode = SessionDisplayMode(rawValue: displayModeRaw) ?? .projectName
+        return session.displayText(for: mode)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Text(session.status.symbol)
@@ -63,7 +73,7 @@ struct SessionRowView: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayName)
+                Text(displayText)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
 
