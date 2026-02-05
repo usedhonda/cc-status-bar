@@ -5,6 +5,7 @@ import AppKit
 @MainActor
 final class SessionObserver: ObservableObject {
     @Published private(set) var sessions: [Session] = []
+    @Published private(set) var codexSessions: [CodexSession] = []
 
     private let storeFile: URL
     private var fileDescriptor: Int32 = -1
@@ -139,6 +140,7 @@ final class SessionObserver: ObservableObject {
         // Invalidate TmuxHelper and CodexObserver caches when session file changes
         TmuxHelper.invalidatePaneInfoCache()
         CodexObserver.invalidateCache()
+        self.codexSessions = Array(CodexObserver.getActiveSessions().values)
 
         guard FileManager.default.fileExists(atPath: storeFile.path) else {
             sessions = []

@@ -152,9 +152,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
 
-        let redCount = sessionObserver.unacknowledgedRedCount
-        let yellowCount = sessionObserver.unacknowledgedYellowCount
-        let greenCount = sessionObserver.displayedGreenCount
+        // Claude Code counts (filtered by setting)
+        let ccRedCount = AppSettings.showClaudeCodeSessions ? sessionObserver.unacknowledgedRedCount : 0
+        let ccYellowCount = AppSettings.showClaudeCodeSessions ? sessionObserver.unacknowledgedYellowCount : 0
+        let ccGreenCount = AppSettings.showClaudeCodeSessions ? sessionObserver.displayedGreenCount : 0
+
+        // Codex counts
+        let codexCounts = getCodexCounts()
+
+        // Combined counts
+        let redCount = ccRedCount + codexCounts.red
+        let yellowCount = ccYellowCount + codexCounts.yellow
+        let greenCount = ccGreenCount + codexCounts.green
         let totalCount = redCount + yellowCount + greenCount
 
         // "CC" color: red > yellow > green > white priority
@@ -252,7 +261,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor
     private func buildMenuItems(into menu: NSMenu) {
-        if sessionObserver.sessions.isEmpty {
+        // Get filtered sessions based on settings
+        let ccSessions = AppSettings.showClaudeCodeSessions ? sessionObserver.sessions : []
+        let codexSessions = AppSettings.showCodexSessions ? getCodexSessionsForMenu() : []
+
+        if ccSessions.isEmpty && codexSessions.isEmpty {
             let emptyItem = NSMenuItem(title: "No active sessions", action: nil, keyEquivalent: "")
             emptyItem.isEnabled = false
             menu.addItem(emptyItem)
@@ -269,9 +282,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             menu.addItem(NSMenuItem.separator())
 
-            // Session list
-            for session in sessionObserver.sessions {
+            // Claude Code sessions
+            for session in ccSessions {
                 menu.addItem(createSessionMenuItem(session))
+            }
+
+            // Codex sessions
+            if !codexSessions.isEmpty {
+                if !ccSessions.isEmpty {
+                    menu.addItem(NSMenuItem.separator())
+                }
+                for codexSession in codexSessions {
+                    menu.addItem(createCodexSessionMenuItem(codexSession))
+                }
             }
         }
 
@@ -302,10 +325,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     public func menuNeedsUpdate(_ menu: NSMenu) {
-        // Rebuild menu with fresh attach states before display
-        TmuxHelper.invalidateAttachStatesCache()
-        menu.removeAllItems()
-        buildMenuItems(into: menu)
+        // No-op: menu is pre-built by reactive rebuildMenu() path.
+        // Avoids 100-500ms main thread block from subprocess/IPC calls
+        // (tmux list-sessions, pgrep, lsof, Accessibility API, AppleScript).
     }
 
     public func menuDidClose(_ menu: NSMenu) {
@@ -351,6 +373,28 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func createSettingsMenu() -> NSMenu {
         let menu = NSMenu()
+
+        // Show Claude Code sessions
+        let showCCItem = NSMenuItem(
+            title: "Show Claude Code",
+            action: #selector(toggleShowClaudeCode(_:)),
+            keyEquivalent: ""
+        )
+        showCCItem.target = self
+        showCCItem.state = AppSettings.showClaudeCodeSessions ? .on : .off
+        menu.addItem(showCCItem)
+
+        // Show Codex sessions
+        let showCodexItem = NSMenuItem(
+            title: "Show Codex",
+            action: #selector(toggleShowCodex(_:)),
+            keyEquivalent: ""
+        )
+        showCodexItem.target = self
+        showCodexItem.state = AppSettings.showCodexSessions ? .on : .off
+        menu.addItem(showCodexItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         // Launch at Login
         let launchItem = NSMenuItem(
@@ -622,6 +666,20 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @MainActor @objc private func toggleShowClaudeCode(_ sender: NSMenuItem) {
+        let newState = !AppSettings.showClaudeCodeSessions
+        AppSettings.showClaudeCodeSessions = newState
+        DebugLog.log("[AppDelegate] Show Claude Code toggled: \(newState), verified: \(AppSettings.showClaudeCodeSessions)")
+        refreshUI()
+    }
+
+    @MainActor @objc private func toggleShowCodex(_ sender: NSMenuItem) {
+        let newState = !AppSettings.showCodexSessions
+        AppSettings.showCodexSessions = newState
+        DebugLog.log("[AppDelegate] Show Codex toggled: \(newState), verified: \(AppSettings.showCodexSessions)")
+        refreshUI()
+    }
+
     @MainActor @objc private func setSessionTimeout(_ sender: NSMenuItem) {
         AppSettings.sessionTimeoutMinutes = sender.tag
         DebugLog.log("[AppDelegate] Session timeout set to: \(sender.tag) minutes")
@@ -687,9 +745,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Set icon using NSMenuItem.image (auto-aligned by macOS)
-        // Use iconWithBadge to show tab number for Ghostty
         let env = EnvironmentResolver.shared.resolve(session: session)
-        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48) {
+        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48, badgeText: "CC") {
             item.image = icon
         }
 
@@ -749,6 +806,178 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.submenu = createSessionActionsMenu(session: session, isAcknowledged: isAcknowledged, isTmuxDetached: isTmuxDetached)
 
         return item
+    }
+
+    // MARK: - Codex Sessions
+
+    /// Get Codex sessions for menu display
+    @MainActor
+    private func getCodexSessionsForMenu() -> [CodexSession] {
+        return Array(CodexObserver.getActiveSessions().values)
+    }
+
+    /// Get Codex session counts for status title
+    @MainActor
+    private func getCodexCounts() -> (red: Int, yellow: Int, green: Int) {
+        guard AppSettings.showCodexSessions else { return (0, 0, 0) }
+
+        let codexSessions = getCodexSessionsForMenu()
+        var yellow = 0
+        var green = 0
+
+        for codexSession in codexSessions {
+            let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
+            if status == .waitingInput {
+                yellow += 1
+            } else {
+                green += 1
+            }
+        }
+
+        // Codex doesn't have red (permission_prompt) distinction
+        return (0, yellow, green)
+    }
+
+    @MainActor
+    private func createCodexSessionMenuItem(_ codexSession: CodexSession) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "",
+            action: #selector(codexItemClicked(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = codexSession
+
+        let attributed = NSMutableAttributedString()
+        let theme = AppSettings.colorTheme
+
+        // Get real-time status from CodexStatusReceiver
+        let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
+        let symbolColor: NSColor = (status == .waitingInput) ? theme.yellowColor : theme.greenColor
+        let symbol = (status == .waitingInput) ? "◐" : "●"
+
+        // Icon: Use terminal icon based on detected terminal app
+        let env = CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
+        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48, badgeText: "Cdx") {
+            item.image = icon
+        }
+
+        // Line 1: ● project-name
+        let symbolAttr = NSAttributedString(
+            string: "\(symbol) ",
+            attributes: [
+                .foregroundColor: symbolColor,
+                .font: NSFont.systemFont(ofSize: 14)
+            ]
+        )
+        attributed.append(symbolAttr)
+
+        let nameAttr = NSAttributedString(
+            string: codexSession.projectName,
+            attributes: [
+                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.boldSystemFont(ofSize: 14)
+            ]
+        )
+        attributed.append(nameAttr)
+
+        // Line 2:   ~/path
+        let displayPath = codexSession.cwd.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path)
+            ? "~" + codexSession.cwd.dropFirst(FileManager.default.homeDirectoryForCurrentUser.path.count)
+            : codexSession.cwd
+        let pathAttr = NSAttributedString(
+            string: "\n   \(displayPath)",
+            attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 12)
+            ]
+        )
+        attributed.append(pathAttr)
+
+        // Line 3:   Environment • Status • HH:mm
+        let envLabel = env.displayName
+        let statusLabel = (status == .waitingInput) ? "Waiting" : "Running"
+        let timeStr = Self.timeFormatter.string(from: codexSession.startedAt)
+        let infoAttr = NSAttributedString(
+            string: "\n   \(envLabel) • \(statusLabel) • \(timeStr)",
+            attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 12)
+            ]
+        )
+        attributed.append(infoAttr)
+
+        item.attributedTitle = attributed
+
+        // Add submenu for quick actions
+        item.submenu = createCodexActionsMenu(codexSession: codexSession)
+
+        return item
+    }
+
+    private func createCodexActionsMenu(codexSession: CodexSession) -> NSMenu {
+        let menu = NSMenu()
+
+        // Open in Finder
+        let finderItem = NSMenuItem(
+            title: "Open in Finder",
+            action: #selector(openCodexInFinder(_:)),
+            keyEquivalent: ""
+        )
+        finderItem.target = self
+        finderItem.representedObject = codexSession
+        menu.addItem(finderItem)
+
+        // Copy Path
+        let copyPathItem = NSMenuItem(
+            title: "Copy Path",
+            action: #selector(copyCodexPath(_:)),
+            keyEquivalent: ""
+        )
+        copyPathItem.target = self
+        copyPathItem.representedObject = codexSession
+        menu.addItem(copyPathItem)
+
+        // Copy TTY (if available)
+        if let tty = codexSession.tty, !tty.isEmpty {
+            let copyTtyItem = NSMenuItem(
+                title: "Copy TTY",
+                action: #selector(copyCodexTty(_:)),
+                keyEquivalent: ""
+            )
+            copyTtyItem.target = self
+            copyTtyItem.representedObject = codexSession
+            menu.addItem(copyTtyItem)
+        }
+
+        return menu
+    }
+
+    @objc private func codexItemClicked(_ sender: NSMenuItem) {
+        guard let codexSession = sender.representedObject as? CodexSession else { return }
+        CodexFocusHelper.focus(session: codexSession)
+        DebugLog.log("[AppDelegate] Focused Codex session: \(codexSession.projectName)")
+    }
+
+    @objc private func openCodexInFinder(_ sender: NSMenuItem) {
+        guard let codexSession = sender.representedObject as? CodexSession else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: codexSession.cwd))
+        DebugLog.log("[AppDelegate] Opened Codex in Finder: \(codexSession.cwd)")
+    }
+
+    @objc private func copyCodexPath(_ sender: NSMenuItem) {
+        guard let codexSession = sender.representedObject as? CodexSession else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(codexSession.cwd, forType: .string)
+        DebugLog.log("[AppDelegate] Copied Codex path: \(codexSession.cwd)")
+    }
+
+    @objc private func copyCodexTty(_ sender: NSMenuItem) {
+        guard let codexSession = sender.representedObject as? CodexSession,
+              let tty = codexSession.tty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(tty, forType: .string)
+        DebugLog.log("[AppDelegate] Copied Codex TTY: \(tty)")
     }
 
     private func createSessionActionsMenu(session: Session, isAcknowledged: Bool, isTmuxDetached: Bool = false) -> NSMenu {

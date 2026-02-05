@@ -10,6 +10,28 @@ struct CodexSession: Equatable {
     /// Session ID from Codex session file (if found)
     var sessionId: String?
 
+    /// TTY device path (e.g., "/dev/ttys001")
+    var tty: String?
+
+    /// tmux session name
+    var tmuxSession: String?
+
+    /// tmux window index
+    var tmuxWindow: String?
+
+    /// tmux pane index
+    var tmuxPane: String?
+
+    /// Terminal app name (e.g., "ghostty", "iTerm.app")
+    var terminalApp: String?
+
+    /// Session status (running or waiting_input)
+    var status: CodexStatus {
+        // Delegate to CodexStatusReceiver for real-time status
+        // Note: This is computed property, actual status comes from receiver
+        return .running  // Default, will be overridden by caller using CodexStatusReceiver
+    }
+
     init(pid: pid_t, cwd: String, sessionId: String? = nil) {
         self.pid = pid
         self.cwd = cwd
@@ -17,6 +39,10 @@ struct CodexSession: Equatable {
         self.startedAt = Date()
         self.sessionId = sessionId
     }
+}
+
+extension CodexSession: Identifiable {
+    var id: String { cwd }
 }
 
 /// Information about Codex session for WebSocket output

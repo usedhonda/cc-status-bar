@@ -8,6 +8,7 @@ enum WebSocketEventType: String {
     case sessionAdded = "session.added"
     case sessionUpdated = "session.updated"
     case sessionRemoved = "session.removed"
+    case hostInfo = "host_info"
 }
 
 /// WebSocket event payload
@@ -18,6 +19,7 @@ struct WebSocketEvent {
     let sessionId: String?  // For session.removed
     let icons: [String: String]?  // For sessions.list
     let icon: String?  // For session.added (new terminal type only)
+    let addresses: [HostAddress]?  // For host_info
 
     init(
         type: WebSocketEventType,
@@ -25,7 +27,8 @@ struct WebSocketEvent {
         session: [String: Any]? = nil,
         sessionId: String? = nil,
         icons: [String: String]? = nil,
-        icon: String? = nil
+        icon: String? = nil,
+        addresses: [HostAddress]? = nil
     ) {
         self.type = type
         self.sessions = sessions
@@ -33,6 +36,7 @@ struct WebSocketEvent {
         self.sessionId = sessionId
         self.icons = icons
         self.icon = icon
+        self.addresses = addresses
     }
 
     func toJSON() -> String {
@@ -53,6 +57,9 @@ struct WebSocketEvent {
         }
         if let icon = icon {
             dict["icon"] = icon
+        }
+        if let addresses = addresses {
+            dict["addresses"] = addresses.map { ["interface": $0.interface, "ip": $0.ip] }
         }
 
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
@@ -87,6 +94,12 @@ final class WebSocketManager {
             connectedClients.insert(session)
         }
         DebugLog.log("[WebSocketManager] Client connected (total: \(connectedClients.count))")
+
+        // Send host_info with all available IP addresses (for smart IP selection)
+        let addresses = NetworkHelper.shared.getAllAddressesWithInterface()
+        let hostInfoEvent = WebSocketEvent(type: .hostInfo, addresses: addresses)
+        sendToClient(session, event: hostInfoEvent)
+        DebugLog.log("[WebSocketManager] Sent host_info with \(addresses.count) addresses")
 
         // Send initial session list with icons (both Claude Code and Codex)
         let claudeSessions = SessionStore.shared.getSessions()
@@ -189,11 +202,20 @@ final class WebSocketManager {
         // Detect added Codex sessions
         for (cwd, codexSession) in currentCodexSessions {
             if !previousCodexCwds.contains(cwd) {
-                if !knownTerminalTypes.contains("Codex") {
-                    knownTerminalTypes.insert("Codex")
+                // Check if this is a new terminal type
+                let terminalName = codexSession.terminalApp ?? "Codex"
+                let isNewTerminalType = !knownTerminalTypes.contains(terminalName)
+                var icon: String? = nil
+
+                if isNewTerminalType {
+                    knownTerminalTypes.insert(terminalName)
+                    // Get icon for the detected terminal
+                    if let terminalApp = codexSession.terminalApp {
+                        icon = IconManager.shared.terminalIconBase64(for: terminalApp, size: 64)
+                    }
                 }
-                // Codex doesn't have a specific icon yet (icon: nil)
-                let event = WebSocketEvent(type: .sessionAdded, session: codexSessionToDict(codexSession))
+
+                let event = WebSocketEvent(type: .sessionAdded, session: codexSessionToDict(codexSession), icon: icon)
                 broadcast(event: event)
             }
         }
@@ -251,21 +273,47 @@ final class WebSocketManager {
     }
 
     /// Convert Codex session to dictionary for WebSocket output
-    private func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
+    /// This method is called from CodexStatusReceiver, so it must be accessible
+    func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
+        // Get status from CodexStatusReceiver
+        let status = CodexStatusReceiver.shared.getStatus(for: session.cwd)
+        let attentionLevel = status == .waitingInput ? 1 : 0  // yellow or green
+
+        // Use detected terminal app, or fallback to "Codex"
+        let terminalName = session.terminalApp ?? "Codex"
+
         var dict: [String: Any] = [
             "type": "codex",
             "id": "codex:\(session.cwd)",
             "pid": session.pid,
             "project": session.projectName,
             "cwd": session.cwd,
-            "status": "running",  // Codex is always running if detected
+            "status": status.rawValue,
             "started_at": ISO8601DateFormatter().string(from: session.startedAt),
-            "attention_level": 0,  // Always green for running
-            "terminal": "Codex"  // For icon lookup
+            "attention_level": attentionLevel,
+            "terminal": terminalName
         ]
 
         if let sessionId = session.sessionId {
             dict["session_id"] = sessionId
+        }
+
+        // Add TTY if available
+        if let tty = session.tty {
+            dict["tty"] = tty
+        }
+
+        // Add tmux info if available
+        if let tmuxSession = session.tmuxSession,
+           let tmuxWindow = session.tmuxWindow,
+           let tmuxPane = session.tmuxPane {
+            dict["tmux"] = [
+                "session": tmuxSession,
+                "window": tmuxWindow,
+                "pane": tmuxPane,
+                "attach_command": "tmux attach -t \(tmuxSession):\(tmuxWindow).\(tmuxPane)",
+                "is_attached": TmuxHelper.isSessionAttached(tmuxSession)
+            ]
         }
 
         return dict
@@ -287,9 +335,19 @@ final class WebSocketManager {
             }
         }
 
-        // Codex icon (if any Codex sessions exist)
-        if !codexSessions.isEmpty && icons["Codex"] == nil {
-            // TODO: Add Codex icon when available
+        // Codex session icons (same as Claude Code - use detected terminal app)
+        for session in codexSessions {
+            if let terminalApp = session.terminalApp, icons[terminalApp] == nil {
+                // Use detected terminal icon
+                if let base64 = IconManager.shared.terminalIconBase64(for: terminalApp, size: 64) {
+                    icons[terminalApp] = base64
+                }
+                knownTerminalTypes.insert(terminalApp)
+            }
+        }
+
+        // Fallback Codex marker (if any session has no detected terminal)
+        if codexSessions.contains(where: { $0.terminalApp == nil }) {
             knownTerminalTypes.insert("Codex")
         }
 

@@ -86,12 +86,45 @@ enum CodexObserver {
                 // Try to find session ID from Codex session files
                 session.sessionId = findCodexSessionId(for: cwd)
 
+                // Get TTY and tmux info
+                if let tty = getTTY(for: pid) {
+                    session.tty = tty
+                    if let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
+                        session.tmuxSession = paneInfo.session
+                        session.tmuxWindow = paneInfo.window
+                        session.tmuxPane = paneInfo.pane
+                        DebugLog.log("[CodexObserver] Found tmux pane for Codex PID \(pid): \(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)")
+
+                        // Detect terminal app from tmux client
+                        if let terminalApp = TmuxHelper.getClientTerminalInfo(for: paneInfo.session) {
+                            session.terminalApp = terminalApp
+                            DebugLog.log("[CodexObserver] Detected terminal for Codex: \(terminalApp)")
+                        }
+                    }
+                }
+
                 sessions[cwd] = session
                 DebugLog.log("[CodexObserver] Found Codex PID \(pid) in \(session.projectName)")
             }
         }
 
         return sessions
+    }
+
+    /// Get TTY for a process
+    /// - Parameter pid: Process ID
+    /// - Returns: TTY path (e.g., "/dev/ttys001") or nil
+    private static func getTTY(for pid: pid_t) -> String? {
+        // ps -p <pid> -o tty=
+        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "tty="])
+        let tty = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Empty or "??" means no controlling terminal
+        guard !tty.isEmpty, tty != "??" else {
+            return nil
+        }
+
+        return "/dev/\(tty)"
     }
 
     /// Get PIDs of running Codex processes
