@@ -8,6 +8,8 @@ enum AppSettings {
         static let webServerEnabled = "webServerEnabled"
         static let webServerPort = "webServerPort"
         static let colorTheme = "colorTheme"
+        static let showClaudeCodeSessions = "showClaudeCodeSessions"
+        static let showCodexSessions = "showCodexSessions"
     }
 
     /// Bundle ID for shared UserDefaults access (CLI and GUI)
@@ -74,5 +76,27 @@ enum AppSettings {
             return ColorTheme(rawValue: raw) ?? .vibrant
         }
         set { defaults.set(newValue.rawValue, forKey: Keys.colorTheme) }
+    }
+
+    static var showClaudeCodeSessions: Bool {
+        get {
+            // Default to true if not set
+            if defaults.object(forKey: Keys.showClaudeCodeSessions) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Keys.showClaudeCodeSessions)
+        }
+        set { defaults.set(newValue, forKey: Keys.showClaudeCodeSessions) }
+    }
+
+    static var showCodexSessions: Bool {
+        get {
+            // Default to true if not set
+            if defaults.object(forKey: Keys.showCodexSessions) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Keys.showCodexSessions)
+        }
+        set { defaults.set(newValue, forKey: Keys.showCodexSessions) }
     }
 }

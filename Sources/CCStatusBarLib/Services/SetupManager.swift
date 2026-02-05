@@ -44,6 +44,16 @@ final class SetupManager {
         .appendingPathComponent(".claude")
     private static let settingsFile = claudeDir.appendingPathComponent("settings.json")
 
+    // Codex config paths
+    private static let codexDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex")
+    private static let codexConfigFile = codexDir.appendingPathComponent("config.toml")
+
+    /// Path to Codex notify script
+    static var codexNotifyScript: URL {
+        binDir.appendingPathComponent("codex-notify.py")
+    }
+
     private init() {}
 
     // MARK: - Public API
@@ -83,6 +93,9 @@ final class SetupManager {
             // Check if app was moved
             checkAndUpdateIfMoved()
         }
+
+        // Register Codex notify (if Codex is installed)
+        registerCodexNotifyIfNeeded()
     }
 
     // MARK: - Translocation Detection
@@ -414,6 +427,114 @@ final class SetupManager {
             UserDefaults.standard.set(Bundle.main.bundlePath, forKey: Keys.lastBundlePath)
         } catch {
             print("Failed to repair settings: \(error)")
+        }
+    }
+
+    // MARK: - Codex Integration
+
+    /// Register Codex notify hook if Codex is installed
+    private func registerCodexNotifyIfNeeded() {
+        guard isCodexInstalled() else {
+            DebugLog.log("[SetupManager] Codex not installed, skipping notify setup")
+            return
+        }
+
+        do {
+            try registerCodexNotify()
+            DebugLog.log("[SetupManager] Codex notify registered")
+        } catch {
+            DebugLog.log("[SetupManager] Failed to register Codex notify: \(error)")
+        }
+    }
+
+    /// Check if Codex CLI is installed
+    private func isCodexInstalled() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = ["codex"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    /// Register Codex notify hook
+    private func registerCodexNotify() throws {
+        let fm = FileManager.default
+
+        // 1. Create notify script
+        let scriptContent = """
+            #!/usr/bin/env python3
+            import sys
+            import json
+            import urllib.request
+
+            if len(sys.argv) < 2:
+                sys.exit(0)
+
+            event = json.loads(sys.argv[1])
+            data = json.dumps(event).encode()
+            try:
+                req = urllib.request.Request(
+                    "http://localhost:8080/api/codex/status",
+                    data=data,
+                    headers={"Content-Type": "application/json"}
+                )
+                urllib.request.urlopen(req, timeout=1)
+            except:
+                pass  # Ignore errors if CC Status Bar is not running
+            """
+
+        try fm.createDirectory(at: Self.binDir, withIntermediateDirectories: true)
+        try scriptContent.write(to: Self.codexNotifyScript, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: Self.codexNotifyScript.path)
+
+        // 2. Update ~/.codex/config.toml
+        try ensureCodexNotifyConfig()
+    }
+
+    /// Ensure Codex config.toml has notify setting
+    private func ensureCodexNotifyConfig() throws {
+        let fm = FileManager.default
+        let configPath = Self.codexConfigFile.path
+        let notifyLine = "notify = [\"python3\", \"\(Self.codexNotifyScript.path)\"]"
+
+        // Create .codex dir if needed
+        try fm.createDirectory(at: Self.codexDir, withIntermediateDirectories: true)
+
+        if fm.fileExists(atPath: configPath) {
+            var content = try String(contentsOfFile: configPath, encoding: .utf8)
+
+            // Check if notify already configured with our script
+            if content.contains(Self.codexNotifyScript.path) {
+                DebugLog.log("[SetupManager] Codex notify already configured")
+                return
+            }
+
+            // Check if notify line exists
+            if content.contains("notify = ") {
+                // Replace existing notify line
+                let lines = content.components(separatedBy: "\n")
+                let updated = lines.map { line in
+                    line.trimmingCharacters(in: .whitespaces).hasPrefix("notify = ") ? notifyLine : line
+                }
+                content = updated.joined(separator: "\n")
+            } else {
+                // Append notify line
+                content += "\n\n# CC Status Bar integration\n\(notifyLine)\n"
+            }
+            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
+            DebugLog.log("[SetupManager] Updated Codex config with notify setting")
+        } else {
+            // Create new config
+            let content = "# CC Status Bar integration\n\(notifyLine)\n"
+            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
+            DebugLog.log("[SetupManager] Created Codex config with notify setting")
         }
     }
 

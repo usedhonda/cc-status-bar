@@ -38,6 +38,15 @@ final class WebServer {
             }
         )
 
+        // POST /api/codex/status - Receive Codex notify events
+        httpServer.POST["/api/codex/status"] = { request in
+            let bodyData = Data(request.body)
+            Task { @MainActor in
+                CodexStatusReceiver.shared.handleEvent(bodyData)
+            }
+            return .ok(.text("received"))
+        }
+
         // Try ports starting from basePort
         var lastError: Error?
         for offset in 0..<maxPortAttempts {

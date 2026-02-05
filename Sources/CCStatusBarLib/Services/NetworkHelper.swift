@@ -1,6 +1,12 @@
 import Foundation
 import Darwin
 
+/// Host address with interface name (for vibeterm smart IP selection)
+struct HostAddress: Codable {
+    let interface: String
+    let ip: String
+}
+
 /// Tailscale status information retrieved via CLI
 struct TailscaleStatus {
     let ip: String           // 100.x.x.x
@@ -265,6 +271,59 @@ final class NetworkHelper {
                 // Skip loopback
                 if !ip.hasPrefix("127.") {
                     addresses.append(ip)
+                }
+            }
+        }
+
+        return addresses
+    }
+
+    /// Get all IPv4 addresses with interface names (for vibeterm smart IP selection)
+    ///
+    /// Returns addresses for all interfaces including:
+    /// - en0 (Wi-Fi)
+    /// - en1 (Ethernet)
+    /// - bridge100 (iPhone USB tethering / Internet Sharing)
+    /// - utunX (Tailscale VPN)
+    func getAllAddressesWithInterface() -> [HostAddress] {
+        var addresses: [HostAddress] = []
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+
+        guard getifaddrs(&ifaddr) == 0 else {
+            return addresses
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        var ptr = ifaddr
+        while let current = ptr {
+            defer { ptr = current.pointee.ifa_next }
+
+            let interface = current.pointee
+            let family = interface.ifa_addr.pointee.sa_family
+
+            // Check for IPv4
+            guard family == UInt8(AF_INET) else { continue }
+
+            // Get interface name
+            let name = String(cString: interface.ifa_name)
+
+            // Get IP address
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let result = getnameinfo(
+                interface.ifa_addr,
+                socklen_t(interface.ifa_addr.pointee.sa_len),
+                &hostname,
+                socklen_t(hostname.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            )
+
+            if result == 0 {
+                let ip = String(cString: hostname)
+                // Skip loopback and link-local
+                if !ip.hasPrefix("127.") && !ip.hasPrefix("169.254.") {
+                    addresses.append(HostAddress(interface: name, ip: ip))
                 }
             }
         }
