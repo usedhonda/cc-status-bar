@@ -266,7 +266,7 @@ final class WebSocketManager {
                 "window": remoteInfo.windowIndex,
                 "pane": remoteInfo.paneIndex,
                 "attach_command": remoteInfo.attachCommand,
-                "is_attached": TmuxHelper.isSessionAttached(remoteInfo.sessionName)
+                "is_attached": TmuxHelper.isSessionAttached(remoteInfo.sessionName, socketPath: remoteInfo.socketPath)
             ]
         }
 
@@ -313,7 +313,7 @@ final class WebSocketManager {
                 "window": tmuxWindow,
                 "pane": tmuxPane,
                 "attach_command": "tmux attach -t \(tmuxSession):\(tmuxWindow).\(tmuxPane)",
-                "is_attached": TmuxHelper.isSessionAttached(tmuxSession)
+                "is_attached": TmuxHelper.isSessionAttached(tmuxSession, socketPath: session.tmuxSocketPath)
             ]
         }
 

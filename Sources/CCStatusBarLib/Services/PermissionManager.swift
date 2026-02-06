@@ -4,6 +4,9 @@ import ApplicationServices
 /// Manages system permissions required for terminal control
 enum PermissionManager {
 
+    private static let accessibilityPromptLock = NSLock()
+    private static var didRequestAccessibilityPromptThisLaunch = false
+
     // MARK: - Permission Status
 
     struct PermissionStatus {
@@ -49,6 +52,26 @@ enum PermissionManager {
         let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [checkOptPrompt: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
+    }
+
+    /// Request accessibility permission at most once per app launch.
+    /// Prevents repeated dialogs when focus attempts happen in a loop.
+    static func requestAccessibilityPermissionOncePerLaunch() {
+        guard !checkAccessibilityPermission() else { return }
+
+        accessibilityPromptLock.lock()
+        let shouldPrompt = !didRequestAccessibilityPromptThisLaunch
+        if shouldPrompt {
+            didRequestAccessibilityPromptThisLaunch = true
+        }
+        accessibilityPromptLock.unlock()
+
+        if shouldPrompt {
+            requestAccessibilityPermission()
+            DebugLog.log("[PermissionManager] Requested Accessibility permission prompt (once per launch)")
+        } else {
+            DebugLog.log("[PermissionManager] Accessibility prompt already requested in this launch, skipping")
+        }
     }
 
     // MARK: - Open System Preferences

@@ -74,7 +74,7 @@ final class SessionListWindowController {
             newPanel.backgroundColor = .clear
 
             // Dynamic height based on total session count (CC + Codex)
-            let codexCount = AppSettings.showCodexSessions ? observer.codexSessions.count : 0
+            let codexCount = AppSettings.showCodexSessions ? currentCodexSessionCount() : 0
             let sessionCount = observer.sessions.count + codexCount
             let height = Self.calculateWindowHeight(sessionCount: sessionCount)
             let fixedWidth: CGFloat = 260
@@ -84,10 +84,13 @@ final class SessionListWindowController {
             newPanel.setFrameAutosaveName("SessionListWindow")
 
             panel = newPanel
+
+            // Enforce required height even when autosaved frame was too small.
+            updateWindowSize(sessionCount: sessionCount)
         } else {
             // Re-showing: reset flag and update size
             userHasResized = false
-            let codexCount = AppSettings.showCodexSessions ? observer.codexSessions.count : 0
+            let codexCount = AppSettings.showCodexSessions ? currentCodexSessionCount() : 0
             updateWindowSize(sessionCount: observer.sessions.count + codexCount)
         }
 
@@ -101,23 +104,32 @@ final class SessionListWindowController {
 
     func updateWindowSize(sessionCount: Int) {
         guard let panel = panel else { return }
+        let requiredHeight = Self.calculateWindowHeight(sessionCount: sessionCount)
+        let currentHeight = panel.frame.height
 
-        // Skip auto-resize if user has manually resized
-        // Reset flag if session count changed significantly (±3)
+        // If user manually resized, keep their size preference unless the window
+        // became smaller than required to display current sessions.
         if userHasResized {
-            let diff = abs(sessionCount - sessionCountAtResize)
-            if diff >= 3 {
-                userHasResized = false
+            if currentHeight >= requiredHeight {
+                // Reset preference only when session count changed significantly (±3)
+                let diff = abs(sessionCount - sessionCountAtResize)
+                if diff >= 3 {
+                    userHasResized = false
+                } else {
+                    return
+                }
             } else {
-                return
+                // Auto-grow to prevent clipping when content exceeds manual size.
+                userHasResized = false
             }
         }
 
-        let height = Self.calculateWindowHeight(sessionCount: sessionCount)
+        let height = requiredHeight
         var frame = panel.frame
         let heightDiff = height - frame.height
         frame.size.height = height
         frame.origin.y -= heightDiff  // Keep top position stable
+        frame = clampedToVisibleScreen(frame, panel: panel)
         panel.setFrame(frame, display: true, animate: true)
     }
 
@@ -140,24 +152,46 @@ final class SessionListWindowController {
         let heightDiff = clampedHeight - frame.height
         frame.size.height = clampedHeight
         frame.origin.y -= heightDiff  // Keep top position stable
+        frame = clampedToVisibleScreen(frame, panel: panel)
         panel.setFrame(frame, display: true, animate: false)
 
         // Mark as user-resized
         markUserResized(sessionCount: sessionCount)
     }
 
+    /// Keep panel fully visible on the current screen.
+    private func clampedToVisibleScreen(_ frame: NSRect, panel: NSPanel) -> NSRect {
+        guard let visible = (panel.screen ?? NSScreen.main)?.visibleFrame else { return frame }
+        var adjusted = frame
+
+        // Vertical clamp
+        if adjusted.maxY > visible.maxY {
+            adjusted.origin.y = visible.maxY - adjusted.height
+        }
+        if adjusted.minY < visible.minY {
+            adjusted.origin.y = visible.minY
+        }
+
+        // Horizontal clamp
+        if adjusted.maxX > visible.maxX {
+            adjusted.origin.x = visible.maxX - adjusted.width
+        }
+        if adjusted.minX < visible.minX {
+            adjusted.origin.x = visible.minX
+        }
+
+        return adjusted
+    }
+
     private static func calculateWindowHeight(sessionCount: Int) -> CGFloat {
-        // Actual layout measurements:
-        // - Filter bar: ~36px (padding.top(8) + button(~20) + padding.bottom(4) + spacing)
-        // - Icon: 48px + padding.vertical(10*2) = 68px per row
-        // - LazyVStack spacing: 6px between rows
-        // - ScrollView padding: top(10) + bottom(10) = 20px
-        // - ResizeHandle: 16px (now separate, not overlapping)
-        let filterBarHeight: CGFloat = 36
-        let rowHeight: CGFloat = 68
+        // Use conservative values to avoid clipping when font metrics / spacing
+        // differ across environments.
+        let filterBarHeight: CGFloat = 44
+        let rowHeight: CGFloat = 76
         let rowSpacing: CGFloat = 6
-        let scrollViewPadding: CGFloat = 20
-        let resizeHandleHeight: CGFloat = 16
+        let scrollViewPadding: CGFloat = 24
+        let resizeHandleHeight: CGFloat = 18
+        let safetyBuffer: CGFloat = 16
 
         let n = max(sessionCount, 1)
         let contentHeight = filterBarHeight
@@ -165,14 +199,19 @@ final class SessionListWindowController {
             + (CGFloat(n) * rowHeight)
             + (n > 1 ? CGFloat(n - 1) * rowSpacing : 0)
             + resizeHandleHeight
+            + safetyBuffer
 
         let minHeight: CGFloat = 100
 
-        // Use 90% of screen's visible height as maximum
+        // Use 95% of screen's visible height as maximum
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        let maxHeight = screenHeight * 0.9
+        let maxHeight = screenHeight * 0.95
 
         return min(max(contentHeight, minHeight), maxHeight)
+    }
+
+    private func currentCodexSessionCount() -> Int {
+        Array(CodexObserver.getActiveSessions().values).count
     }
 }
 
@@ -181,17 +220,22 @@ final class SessionListWindowController {
 struct SessionListWindowView: View {
     @ObservedObject var observer: SessionObserver
     @State private var dragStartHeight: CGFloat = 0
+    @State private var codexRefreshTick = Date()
     @AppStorage("showClaudeCodeSessions", store: AppSettings.userDefaultsStore)
     private var showCC: Bool = true
     @AppStorage("showCodexSessions", store: AppSettings.userDefaultsStore)
     private var showCodex: Bool = true
+    private let codexRefreshTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
     private var filteredCCSessions: [Session] {
         showCC ? observer.sessions : []
     }
 
     private var filteredCodexSessions: [CodexSession] {
-        showCodex ? observer.codexSessions : []
+        _ = codexRefreshTick
+        return showCodex
+            ? Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+            : []
     }
 
     private var totalSessionCount: Int {
@@ -252,6 +296,9 @@ struct SessionListWindowView: View {
         }
         .onChange(of: totalSessionCount) { newCount in
             SessionListWindowController.shared.updateWindowSize(sessionCount: newCount)
+        }
+        .onReceive(codexRefreshTimer) { _ in
+            codexRefreshTick = Date()
         }
     }
 }
@@ -470,7 +517,7 @@ struct PinnedSessionRowView: View {
         // Check if tmux session is detached
         var isTmuxDetached = false
         if let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-            isTmuxDetached = !TmuxHelper.isSessionAttached(paneInfo.session)
+            isTmuxDetached = !TmuxHelper.isSessionAttached(paneInfo.session, socketPath: paneInfo.socketPath)
         }
 
         if isTmuxDetached {

@@ -754,7 +754,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let paneInfo: TmuxHelper.PaneInfo? = session.tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
 
         // Check if tmux session is detached
-        let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session) } ?? false
+        let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session, socketPath: $0.socketPath) } ?? false
 
         // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
         let theme = AppSettings.colorTheme
