@@ -77,22 +77,24 @@ final class NetworkHelper {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             DebugLog.log("[NetworkHelper] Failed to run Tailscale CLI: \(error)")
             return nil
         }
 
+        // Read stdout BEFORE waitUntilExit to avoid pipe buffer deadlock
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
         guard process.terminationStatus == 0 else {
             DebugLog.log("[NetworkHelper] Tailscale CLI exited with status \(process.terminationStatus)")
-            return nil
+            return fallbackTailscaleStatus()
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            DebugLog.log("[NetworkHelper] Failed to parse Tailscale JSON")
-            return nil
+            let preview = String(data: data.prefix(200), encoding: .utf8) ?? "(non-UTF8)"
+            DebugLog.log("[NetworkHelper] Failed to parse Tailscale JSON (bytes: \(data.count), preview: \(preview))")
+            return fallbackTailscaleStatus()
         }
 
         // Check BackendState
@@ -187,6 +189,19 @@ final class NetworkHelper {
     /// Check if Tailscale IP is available
     var hasTailscale: Bool {
         getTailscaleIP() != nil
+    }
+
+    // MARK: - Tailscale Fallback
+
+    /// Fallback: detect Tailscale via network interface when CLI fails
+    private func fallbackTailscaleStatus() -> TailscaleStatus? {
+        guard let ip = getTailscaleIP() else {
+            DebugLog.log("[NetworkHelper] Fallback: no Tailscale IP on network interfaces")
+            return nil
+        }
+        DebugLog.log("[NetworkHelper] Fallback: found Tailscale IP \(ip) via interface")
+        // hostname unavailable without CLI - use IP as hostname
+        return TailscaleStatus(ip: ip, hostname: ip, isConnected: true)
     }
 
     // MARK: - Private Helpers
