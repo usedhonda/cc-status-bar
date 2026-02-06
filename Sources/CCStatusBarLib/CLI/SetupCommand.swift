@@ -145,7 +145,7 @@ public struct SetupCommand: ParsableCommand {
                     }
                     return !innerHooks.contains { hook in
                         guard let command = hook["command"] as? String else { return false }
-                        return command.contains("CCStatusBar hook")
+                        return SetupManager.isOwnHookCommand(command)
                     }
                 }
                 eventHooks.append(entry)

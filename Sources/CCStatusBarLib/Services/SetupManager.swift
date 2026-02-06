@@ -56,9 +56,24 @@ final class SetupManager {
 
     private init() {}
 
-    private static func isOwnHookCommand(_ command: String) -> Bool {
-        command.contains("CCStatusBar hook")
+    /// Check whether a command string is one of CCStatusBar's hook commands.
+    /// Supports quoted paths with spaces, e.g. "\".../CCStatusBar\" hook Notification".
+    static func isOwnHookCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        return ownHookCommandRegex.firstMatch(in: normalized, options: [], range: range) != nil
     }
+
+    private static let ownHookCommandRegex: NSRegularExpression = {
+        // Match /CCStatusBar[optional quote] <space> hook <space or end>
+        // Examples:
+        // - "/Users/.../CCStatusBar" hook Notification
+        // - /usr/local/bin/CCStatusBar hook Stop
+        // - CCStatusBar hook Notification
+        let pattern = #"(?:^|/)CCStatusBar(?:["'])?\s+hook(?:\s+|$)"#
+        return try! NSRegularExpression(pattern: pattern)
+    }()
 
     // MARK: - Public API
 
