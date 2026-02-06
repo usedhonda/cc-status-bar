@@ -72,6 +72,7 @@ enum TmuxHelper {
     static func getPaneInfo(for tty: String) -> PaneInfo? {
         let now = Date()
         let normalizedTTY = normalizeTTY(tty)
+        guard !normalizedTTY.isEmpty else { return nil }
 
         // Check cache
         if let cached = paneInfoCache[normalizedTTY],
@@ -82,7 +83,13 @@ enum TmuxHelper {
 
         // Cache miss - fetch from tmux
         let info = fetchPaneInfoFromTmux(normalizedTTY)
-        paneInfoCache[normalizedTTY] = (info, now)
+        // Do not cache misses. Socket paths / tmux servers can change rapidly,
+        // and negative caching causes long periods of fallback display.
+        if let info {
+            paneInfoCache[normalizedTTY] = (info, now)
+        } else {
+            paneInfoCache.removeValue(forKey: normalizedTTY)
+        }
         return info
     }
 
@@ -91,22 +98,45 @@ enum TmuxHelper {
         // Use tab separator to handle window names containing "|"
         let format = "#{pane_tty}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}"
         let commandArgs = ["list-panes", "-a", "-F", format]
+        var checkedSocketPaths = Set<String>()
+        var diagnostics: [String] = []
 
         // 1) Try default tmux server (works when TMUX env is available)
         let defaultOutput = runTmuxCommandArgs(commandArgs)
+        diagnostics.append("default:\(summarizePaneOutput(defaultOutput))")
         if let info = parsePaneInfo(from: defaultOutput, matchingTTY: tty, socketPath: nil) {
             return info
         }
 
         // 2) Fallback: search known socket files (works from GUI process without TMUX env)
-        for socketPath in discoverSocketPaths() {
+        let socketPaths = discoverSocketPaths()
+        for socketPath in socketPaths {
+            checkedSocketPaths.insert(socketPath)
             let output = runTmuxCommandArgs(commandArgs, socketPath: socketPath)
+            let name = URL(fileURLWithPath: socketPath).lastPathComponent
+            diagnostics.append("socket[\(name)]:\(summarizePaneOutput(output))")
             if let info = parsePaneInfo(from: output, matchingTTY: tty, socketPath: socketPath) {
                 return info
             }
         }
 
-        DebugLog.log("[TmuxHelper] No pane found for TTY \(tty) (checked default + discovered sockets)")
+        // 3) Socket list might be stale (tmux restarted / socket moved). Refresh once and retry.
+        let refreshedSocketPaths = discoverSocketPaths(forceRefresh: true)
+        let retryPaths = refreshedSocketPaths.filter { !checkedSocketPaths.contains($0) }
+        if !retryPaths.isEmpty {
+            DebugLog.log("[TmuxHelper] Retry pane lookup after socket refresh for TTY \(tty)")
+            for socketPath in retryPaths {
+                let output = runTmuxCommandArgs(commandArgs, socketPath: socketPath)
+                let name = URL(fileURLWithPath: socketPath).lastPathComponent
+                diagnostics.append("retry[\(name)]:\(summarizePaneOutput(output))")
+                if let info = parsePaneInfo(from: output, matchingTTY: tty, socketPath: socketPath) {
+                    return info
+                }
+            }
+        }
+
+        let diagText = diagnostics.joined(separator: "; ")
+        DebugLog.log("[TmuxHelper] No pane found for TTY \(tty) (checked default + discovered sockets) | \(diagText)")
         return nil
     }
 
@@ -366,6 +396,24 @@ enum TmuxHelper {
         return nil
     }
 
+    /// Summarize list-panes output for diagnostics.
+    /// Example: "rows=3,ttys=/dev/ttys001,/dev/ttys002,+1"
+    private static func summarizePaneOutput(_ output: String) -> String {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+        guard !lines.isEmpty else { return "rows=0" }
+
+        let ttySamples = lines.prefix(2).map { line -> String in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let raw = parts.first else { return "unknown" }
+            return normalizeTTY(raw)
+        }
+        let remaining = lines.count - ttySamples.count
+        let suffix = remaining > 0 ? ",+\(remaining)" : ""
+        return "rows=\(lines.count),ttys=\(ttySamples.joined(separator: ","))\(suffix)"
+    }
+
     private static func mergeAttachStates(from output: String, into states: inout [String: Bool]) {
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: "|").map(String.init)
@@ -376,9 +424,10 @@ enum TmuxHelper {
         }
     }
 
-    private static func discoverSocketPaths() -> [String] {
+    private static func discoverSocketPaths(forceRefresh: Bool = false) -> [String] {
         let now = Date()
-        if let cached = socketPathsCache,
+        if !forceRefresh,
+           let cached = socketPathsCache,
            now.timeIntervalSince(cached.timestamp) < socketPathsCacheTTL {
             return cached.paths
         }
@@ -467,8 +516,12 @@ enum TmuxHelper {
             let errorOutput = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            if process.terminationStatus != 0, !errorOutput.isEmpty {
-                DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args) | \(errorOutput)")
+            if process.terminationStatus != 0 {
+                if errorOutput.isEmpty {
+                    DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args)")
+                } else {
+                    DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args) | \(errorOutput)")
+                }
             }
 
             return output
