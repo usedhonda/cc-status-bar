@@ -39,8 +39,14 @@ enum TmuxHelper {
     private static let terminalCacheTTL: TimeInterval = 60.0
 
     /// Cache for session attach states (TTL: 5 seconds)
-    private static var attachStatesCache: (states: [String: Bool], timestamp: Date)?
+    private struct AttachStatesSnapshot {
+        let statesBySocket: [String: [String: Bool]]
+        let mergedStates: [String: Bool]
+        let timestamp: Date
+    }
+    private static var attachStatesCache: AttachStatesSnapshot?
     private static let attachStatesCacheTTL: TimeInterval = 5.0
+    private static let unknownDefaultSocketKey = "__default__"
 
     /// Cache for discovered tmux socket paths (TTL: 30 seconds)
     private static var socketPathsCache: (paths: [String], timestamp: Date)?
@@ -166,6 +172,7 @@ enum TmuxHelper {
         let sessionName: String
         let windowIndex: String
         let paneIndex: String
+        let socketPath: String?
 
         /// Generate the tmux attach command for remote access
         var attachCommand: String {
@@ -188,7 +195,8 @@ enum TmuxHelper {
         return RemoteAccessInfo(
             sessionName: paneInfo.session,
             windowIndex: paneInfo.window,
-            paneIndex: paneInfo.pane
+            paneIndex: paneInfo.pane,
+            socketPath: paneInfo.socketPath
         )
     }
 
@@ -197,36 +205,25 @@ enum TmuxHelper {
     /// Get attached status for all tmux sessions
     /// - Returns: Dictionary of session_name -> is_attached
     static func getSessionAttachStates() -> [String: Bool] {
-        let now = Date()
-        if let cached = attachStatesCache,
-           now.timeIntervalSince(cached.timestamp) < attachStatesCacheTTL {
-            return cached.states
-        }
-
-        var states: [String: Bool] = [:]
-
-        // 1) Default server (or TMUX env-derived server)
-        mergeAttachStates(
-            from: runTmuxCommandArgs(["list-sessions", "-F", "#{session_name}|#{session_attached}"]),
-            into: &states
-        )
-
-        // 2) Additional sockets for GUI context without TMUX env
-        for socketPath in discoverSocketPaths() {
-            mergeAttachStates(
-                from: runTmuxCommandArgs(["list-sessions", "-F", "#{session_name}|#{session_attached}"], socketPath: socketPath),
-                into: &states
-            )
-        }
-
-        attachStatesCache = (states, now)
-        DebugLog.log("[TmuxHelper] Fetched attach states: \(states)")
-        return states
+        return getAttachStatesSnapshot().mergedStates
     }
 
     /// Check if a specific tmux session is attached
-    static func isSessionAttached(_ sessionName: String) -> Bool {
-        return getSessionAttachStates()[sessionName] ?? false
+    static func isSessionAttached(_ sessionName: String, socketPath: String? = nil) -> Bool {
+        let snapshot = getAttachStatesSnapshot()
+        let key = socketKey(for: socketPath)
+
+        if let attached = snapshot.statesBySocket[key]?[sessionName] {
+            return attached
+        }
+
+        // socketPath が不明な場合のみ、デフォルト問い合わせが失敗したケースの
+        // フォールバックとして merged を参照する。
+        if socketPath == nil {
+            return snapshot.mergedStates[sessionName] ?? false
+        }
+
+        return false
     }
 
     /// List all tmux session names
@@ -369,18 +366,57 @@ enum TmuxHelper {
     private static func normalizeTTY(_ tty: String) -> String {
         let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
-        if trimmed.hasPrefix("/dev/") {
-            return trimmed
+
+        // Some legacy/edge outputs can include extra tokens (e.g. "\\t" chunks or
+        // underscored compact rows). Use only the first token as tty candidate.
+        let firstToken = String(
+            trimmed.split(whereSeparator: {
+                $0 == "\t" || $0 == " " || $0 == "|" || $0 == "\\" || $0 == "_"
+            }).first ?? Substring(trimmed)
+        )
+
+        if firstToken.hasPrefix("/dev/") {
+            return firstToken
         }
-        if trimmed.hasPrefix("dev/") {
-            return "/\(trimmed)"
+        if firstToken.hasPrefix("dev/") {
+            return "/\(firstToken)"
         }
-        return "/dev/\(trimmed)"
+        return "/dev/\(firstToken)"
+    }
+
+    /// Split a `tmux list-panes -F ...` row into 5 columns.
+    /// Supports multiple delimiter formats to tolerate environment/version differences.
+    private static func splitPaneColumns(_ line: Substring) -> [String] {
+        let raw = String(line)
+
+        // Preferred/current formats
+        for delimiter in ["\t", "\\t", "|"] {
+            let parts = raw.components(separatedBy: delimiter)
+            if parts.count >= 5 {
+                // Join tail back into window_name in case it contains delimiter.
+                return [
+                    parts[0],
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    parts[4...].joined(separator: delimiter)
+                ]
+            }
+        }
+
+        // Legacy fallback: compact underscore-separated rows
+        // e.g. /dev/ttys001_default-0_0_0_zsh
+        let legacy = raw.split(separator: "_", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+        if legacy.count >= 5 {
+            return legacy
+        }
+
+        return []
     }
 
     private static func parsePaneInfo(from output: String, matchingTTY tty: String, socketPath: String?) -> PaneInfo? {
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            let parts = splitPaneColumns(line)
             guard parts.count >= 5 else { continue }
             if normalizeTTY(parts[0]) == tty {
                 DebugLog.log("[TmuxHelper] Found pane: \(parts[1]):\(parts[2]).\(parts[3]) (window: \(parts[4])) for TTY \(tty)")
@@ -405,7 +441,7 @@ enum TmuxHelper {
         guard !lines.isEmpty else { return "rows=0" }
 
         let ttySamples = lines.prefix(2).map { line -> String in
-            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            let parts = splitPaneColumns(line)
             guard let raw = parts.first else { return "unknown" }
             return normalizeTTY(raw)
         }
@@ -414,14 +450,73 @@ enum TmuxHelper {
         return "rows=\(lines.count),ttys=\(ttySamples.joined(separator: ","))\(suffix)"
     }
 
-    private static func mergeAttachStates(from output: String, into states: inout [String: Bool]) {
+    private static func getAttachStatesSnapshot() -> AttachStatesSnapshot {
+        let now = Date()
+        if let cached = attachStatesCache,
+           now.timeIntervalSince(cached.timestamp) < attachStatesCacheTTL {
+            return cached
+        }
+
+        let listSessionsArgs = ["list-sessions", "-F", "#{session_name}|#{session_attached}"]
+        var statesBySocket: [String: [String: Bool]] = [:]
+        let defaultKey = defaultSocketKey()
+
+        // 1) Default server (or TMUX env-derived server)
+        statesBySocket[defaultKey] = parseAttachStates(
+            from: runTmuxCommandArgs(listSessionsArgs)
+        )
+
+        // 2) Additional sockets for GUI context without TMUX env
+        for socketPath in discoverSocketPaths() {
+            let key = socketKey(for: socketPath)
+            statesBySocket[key] = parseAttachStates(
+                from: runTmuxCommandArgs(listSessionsArgs, socketPath: socketPath)
+            )
+        }
+
+        var merged: [String: Bool] = [:]
+        for states in statesBySocket.values {
+            for (sessionName, attached) in states {
+                merged[sessionName] = (merged[sessionName] ?? false) || attached
+            }
+        }
+
+        let snapshot = AttachStatesSnapshot(
+            statesBySocket: statesBySocket,
+            mergedStates: merged,
+            timestamp: now
+        )
+        attachStatesCache = snapshot
+        DebugLog.log("[TmuxHelper] Fetched attach states by socket: \(statesBySocket)")
+        return snapshot
+    }
+
+    private static func parseAttachStates(from output: String) -> [String: Bool] {
+        var states: [String: Bool] = [:]
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: "|").map(String.init)
             guard parts.count == 2 else { continue }
-            let attached = (parts[1] == "1")
-            // Keep `true` if any socket reports the session as attached
-            states[parts[0]] = (states[parts[0]] ?? false) || attached
+            states[parts[0]] = (parts[1] == "1")
         }
+        return states
+    }
+
+    private static func defaultSocketKey() -> String {
+        if let tmuxEnv = ProcessInfo.processInfo.environment["TMUX"],
+           let rawSocket = tmuxEnv.split(separator: ",", maxSplits: 1).first {
+            let socketPath = String(rawSocket)
+            if !socketPath.isEmpty {
+                return (socketPath as NSString).standardizingPath
+            }
+        }
+        return unknownDefaultSocketKey
+    }
+
+    private static func socketKey(for socketPath: String?) -> String {
+        if let socketPath = socketPath, !socketPath.isEmpty {
+            return (socketPath as NSString).standardizingPath
+        }
+        return defaultSocketKey()
     }
 
     private static func discoverSocketPaths(forceRefresh: Bool = false) -> [String] {

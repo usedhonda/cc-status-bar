@@ -96,6 +96,7 @@ enum CodexObserver {
                         session.tmuxSession = paneInfo.session
                         session.tmuxWindow = paneInfo.window
                         session.tmuxPane = paneInfo.pane
+                        session.tmuxSocketPath = paneInfo.socketPath
                         DebugLog.log("[CodexObserver] Found tmux pane for Codex PID \(pid): \(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)")
 
                         // Detect terminal app from tmux client

@@ -131,26 +131,12 @@ enum GhosttyHelper {
         return false
     }
 
-    /// Check if accessibility permission is granted
-    static func checkAccessibilityPermission() -> Bool {
-        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let options = [checkOptPrompt: false] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
-    }
-
-    /// Request accessibility permission (shows system dialog)
-    static func requestAccessibilityPermission() {
-        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let options = [checkOptPrompt: true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
-    }
-
     /// Find and click a tab by its title using Accessibility API
     private static func focusTabByTitle(_ targetTitle: String, pid: pid_t) -> Bool {
         // Check accessibility permission first
-        if !checkAccessibilityPermission() {
+        if !PermissionManager.checkAccessibilityPermission() {
             DebugLog.log("[GhosttyHelper] Accessibility permission not granted")
-            requestAccessibilityPermission()
+            PermissionManager.requestAccessibilityPermissionOncePerLaunch()
             return false
         }
 

@@ -22,6 +22,9 @@ struct CodexSession: Equatable {
     /// tmux pane index
     var tmuxPane: String?
 
+    /// tmux socket path (for non-default servers)
+    var tmuxSocketPath: String?
+
     /// Terminal app name (e.g., "ghostty", "iTerm.app")
     var terminalApp: String?
 
