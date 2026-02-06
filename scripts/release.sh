@@ -50,13 +50,14 @@ echo ""
 
 # Step 2: Release build
 echo -e "${GREEN}[2/8] Building release...${NC}"
-swift build -c release --quiet
+swift build -c release --arch arm64 --arch x86_64 --quiet
 echo -e "${GREEN}Build complete${NC}"
 echo ""
 
 # Step 3: Copy to app bundle
 echo -e "${GREEN}[3/8] Updating app bundle...${NC}"
-cp .build/release/${APP_NAME} ${APP_NAME}.app/Contents/MacOS/
+cp .build/apple/Products/Release/${APP_NAME} ${APP_NAME}.app/Contents/MacOS/
+echo "Architecture: $(lipo -info ${APP_NAME}.app/Contents/MacOS/${APP_NAME})"
 echo -e "${GREEN}App bundle updated${NC}"
 echo ""
 
