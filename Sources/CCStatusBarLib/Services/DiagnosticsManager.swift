@@ -327,7 +327,7 @@ final class DiagnosticsManager: ObservableObject {
                         if let hookList = hook["hooks"] as? [[String: Any]] {
                             for h in hookList {
                                 if let command = h["command"] as? String,
-                                   command.contains("CCStatusBar") {
+                                   command.contains("CCStatusBar hook") {
                                     hasAnyHook = true
                                     break
                                 }
