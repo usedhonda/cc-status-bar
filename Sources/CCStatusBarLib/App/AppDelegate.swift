@@ -847,7 +847,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Get Codex sessions for menu display
     @MainActor
     private func getCodexSessionsForMenu() -> [CodexSession] {
-        return Array(CodexObserver.getActiveSessions().values)
+        return Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
     }
 
     /// Get Codex session counts for status title
@@ -1309,8 +1309,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Update symlink to point to this executable
     private func updateSymlinkToSelf() {
-        let symlinkPath = NSString("~/Library/Application Support/CCStatusBar/bin/CCStatusBar")
-            .expandingTildeInPath
+        let symlinkPath = SetupManager.symlinkURL.path
         guard let executablePath = Bundle.main.executablePath else {
             DebugLog.log("[AppDelegate] Cannot get executable path for symlink update")
             return

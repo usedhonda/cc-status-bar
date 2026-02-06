@@ -56,6 +56,10 @@ final class SetupManager {
 
     private init() {}
 
+    private static func isOwnHookCommand(_ command: String) -> Bool {
+        command.contains("CCStatusBar hook")
+    }
+
     // MARK: - Public API
 
     /// Run setup wizard. Use force=true to reconfigure even if already set up.
@@ -164,7 +168,7 @@ final class SetupManager {
                         if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
                             for hook in innerHooks {
                                 if let command = hook["command"] as? String,
-                                   command.contains("CCStatusBar hook") {
+                                   Self.isOwnHookCommand(command) {
                                     return false // Found our hook
                                 }
                             }
@@ -315,7 +319,7 @@ final class SetupManager {
                     // Remove any existing CCStatusBar hooks from this entry
                     innerHooks = innerHooks.filter { hook in
                         guard let command = hook["command"] as? String else { return true }
-                        if command.contains("CCStatusBar") {
+                        if Self.isOwnHookCommand(command) {
                             hadExistingCCStatusBarHook = true
                             return false
                         }
@@ -560,7 +564,7 @@ final class SetupManager {
                     }
                     return !innerHooks.contains { hook in
                         guard let command = hook["command"] as? String else { return false }
-                        return command.contains("CCStatusBar hook")
+                        return Self.isOwnHookCommand(command)
                     }
                 }
                 if filtered.isEmpty {

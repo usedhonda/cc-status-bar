@@ -42,7 +42,7 @@ struct CodexSession: Equatable {
 }
 
 extension CodexSession: Identifiable {
-    var id: String { cwd }
+    var id: String { "codex:\(pid)" }
 
     /// Display text based on session display mode setting
     func displayText(for mode: SessionDisplayMode) -> String {

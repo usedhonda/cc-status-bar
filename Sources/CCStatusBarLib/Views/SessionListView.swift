@@ -57,7 +57,7 @@ struct SessionRowView: View {
     let session: Session
 
     // Watch for sessionDisplayMode changes to trigger re-render
-    @AppStorage("sessionDisplayMode", store: UserDefaults(suiteName: "com.ccstatusbar.app"))
+    @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
     private var displayModeRaw: String = "project"
 
     /// Computed display text based on sessionDisplayMode setting

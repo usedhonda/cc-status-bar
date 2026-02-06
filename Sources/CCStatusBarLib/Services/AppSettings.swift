@@ -39,6 +39,11 @@ enum AppSettings {
         UserDefaults(suiteName: bundleID) ?? UserDefaults.standard
     }
 
+    /// Shared UserDefaults store (for @AppStorage)
+    static var userDefaultsStore: UserDefaults {
+        defaults
+    }
+
     static var launchAtLogin: Bool {
         get { defaults.bool(forKey: Keys.launchAtLogin) }
         set { defaults.set(newValue, forKey: Keys.launchAtLogin) }
