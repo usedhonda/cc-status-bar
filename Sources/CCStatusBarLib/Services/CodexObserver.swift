@@ -157,7 +157,38 @@ enum CodexObserver {
             }
         }
 
-        return Array(pidSet).sorted()
+        // Exclude helper/background subcommands that are not interactive Codex CLI sessions.
+        // Example: `codex mcp-server` started by Claude Code.
+        let filteredPIDs = pidSet.filter { pid in
+            let commandLine = getCommandLine(for: pid)
+            let shouldTrack = shouldTrackCodexCommandLine(commandLine)
+            if !shouldTrack {
+                DebugLog.log("[CodexObserver] Skipping non-interactive Codex process PID \(pid): \(commandLine)")
+            }
+            return shouldTrack
+        }
+
+        return Array(filteredPIDs).sorted()
+    }
+
+    /// Check whether a Codex command line should be tracked as an active Codex session.
+    /// Visible for tests.
+    static func shouldTrackCodexCommandLine(_ commandLine: String) -> Bool {
+        let normalized = commandLine.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+
+        // Claude Code can spawn this for MCP integration. It should not appear as a Codex session.
+        if normalized.contains("mcp-server") {
+            return false
+        }
+
+        return true
+    }
+
+    /// Get full command line for a process
+    private static func getCommandLine(for pid: pid_t) -> String {
+        runCommand("/bin/ps", ["-p", "\(pid)", "-o", "command="])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Get current working directory for a process

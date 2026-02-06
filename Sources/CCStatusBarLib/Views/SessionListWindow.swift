@@ -570,6 +570,12 @@ struct PinnedCodexSessionRowView: View {
         CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
     }
 
+    private var waitingReason: CodexWaitingReason? {
+        status == .waitingInput
+            ? CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
+            : nil
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Terminal icon with badge
@@ -683,13 +689,20 @@ struct PinnedCodexSessionRowView: View {
     }
 
     private var statusLabel: String {
-        status == .waitingInput ? "Waiting" : "Running"
+        if status == .waitingInput {
+            return waitingReason == .permissionPrompt ? "Permission" : "Waiting"
+        }
+        return "Running"
     }
 
     private var statusColor: Color {
-        status == .waitingInput
-            ? Color(red: 1.0, green: 0.7, blue: 0.2)
-            : Color(red: 0.3, green: 0.85, blue: 0.4)
+        if status == .waitingInput {
+            if waitingReason == .permissionPrompt {
+                return Color(red: 1.0, green: 0.3, blue: 0.3)
+            }
+            return Color(red: 1.0, green: 0.7, blue: 0.2)
+        }
+        return Color(red: 0.3, green: 0.85, blue: 0.4)
     }
 
     private func focusCodexSession() {
