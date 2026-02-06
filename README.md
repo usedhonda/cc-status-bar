@@ -114,7 +114,7 @@ CC Status Bar uses OSC escape sequences to set unique tab titles for reliable id
 
 ## Requirements
 
-- macOS 13.0+
+- macOS 13.0+ (Apple Silicon and Intel Macs)
 - Claude Code CLI
 - Accessibility permission (for Ghostty tab switching)
 
