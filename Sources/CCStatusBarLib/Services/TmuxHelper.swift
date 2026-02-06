@@ -349,7 +349,7 @@ enum TmuxHelper {
     }
 
     private static func parsePaneInfo(from output: String, matchingTTY tty: String, socketPath: String?) -> PaneInfo? {
-        for line in output.split(separator: "\n") {
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             guard parts.count >= 5 else { continue }
             if normalizeTTY(parts[0]) == tty {
