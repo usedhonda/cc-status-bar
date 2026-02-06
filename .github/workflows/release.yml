@@ -59,7 +59,8 @@ jobs:
         run: |
           npm install -g @elgato/cli
           cd StreamDeckPlugin/com.ccstatusbar.sdPlugin
-          npx tsc src/plugin.ts --outDir bin --target ES2020 --module CommonJS --esModuleInterop
+          npm ci
+          npm run build
           cd ..
           streamdeck pack com.ccstatusbar.sdPlugin
 
