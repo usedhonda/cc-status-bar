@@ -181,8 +181,10 @@ final class SessionListWindowController {
 struct SessionListWindowView: View {
     @ObservedObject var observer: SessionObserver
     @State private var dragStartHeight: CGFloat = 0
-    @State private var showCC = AppSettings.showClaudeCodeSessions
-    @State private var showCodex = AppSettings.showCodexSessions
+    @AppStorage("showClaudeCodeSessions", store: AppSettings.userDefaultsStore)
+    private var showCC: Bool = true
+    @AppStorage("showCodexSessions", store: AppSettings.userDefaultsStore)
+    private var showCodex: Bool = true
 
     private var filteredCCSessions: [Session] {
         showCC ? observer.sessions : []
@@ -205,11 +207,9 @@ struct SessionListWindowView: View {
                     HStack(spacing: 8) {
                         FilterToggleButton(label: "CC", isOn: showCC) {
                             showCC.toggle()
-                            AppSettings.showClaudeCodeSessions = showCC
                         }
                         FilterToggleButton(label: "Codex", isOn: showCodex) {
                             showCodex.toggle()
-                            AppSettings.showCodexSessions = showCodex
                         }
                         Spacer()
                     }
@@ -339,7 +339,7 @@ struct PinnedSessionRowView: View {
     @State private var isPressed = false
 
     // Watch for sessionDisplayMode changes to trigger re-render
-    @AppStorage("sessionDisplayMode", store: UserDefaults(suiteName: "com.ccstatusbar.app"))
+    @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
     private var displayModeRaw: String = "project"
 
     private var env: FocusEnvironment {
@@ -506,7 +506,7 @@ struct PinnedCodexSessionRowView: View {
     @State private var isPressed = false
 
     // Watch for sessionDisplayMode changes to trigger re-render
-    @AppStorage("sessionDisplayMode", store: UserDefaults(suiteName: "com.ccstatusbar.app"))
+    @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
     private var displayModeRaw: String = "project"
 
     /// Computed display text based on sessionDisplayMode setting

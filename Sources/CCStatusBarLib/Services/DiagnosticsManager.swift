@@ -85,8 +85,10 @@ enum DiagnosticIssue: Identifiable {
             Session tracking won't work without hooks.
             """
         case .sessionsFileIssue(let reason):
+            let expected = SetupManager.sessionsFile.path
+                .replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
             return """
-            Expected: ~/Library/Application Support/CCStatusBar/sessions.json
+            Expected: \(expected)
             Status: \(reason)
             """
         }
@@ -133,11 +135,15 @@ enum DiagnosticIssue: Identifiable {
             See README.md for complete configuration.
             """
         case .sessionsFileIssue:
+            let appSupportDir = SetupManager.appSupportDir.path
+                .replacingOccurrences(of: " ", with: "\\ ")
+            let sessionsPath = SetupManager.sessionsFile.path
+                .replacingOccurrences(of: " ", with: "\\ ")
             return """
             1. Restart the app (file will be created automatically)
             2. If that doesn't work:
-               mkdir -p ~/Library/Application\\ Support/CCStatusBar
-               echo '{"sessions":{}}' > ~/Library/Application\\ Support/CCStatusBar/sessions.json
+               mkdir -p \(appSupportDir)
+               echo '{"sessions":{}}' > \(sessionsPath)
             """
         }
     }

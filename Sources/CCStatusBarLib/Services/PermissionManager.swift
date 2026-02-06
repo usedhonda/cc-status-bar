@@ -55,18 +55,58 @@ enum PermissionManager {
 
     /// Open Accessibility preferences pane
     static func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-            DebugLog.log("[PermissionManager] Opened Accessibility settings")
+        // Also trigger the native Accessibility prompt if possible.
+        requestAccessibilityPermission()
+
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy"
+        ]
+
+        if openFirstAvailableURL(candidates, logLabel: "Accessibility settings") {
+            return
+        }
+
+        // Last resort: open System Settings app directly.
+        let systemSettingsPath = "/System/Applications/System Settings.app"
+        if NSWorkspace.shared.open(URL(fileURLWithPath: systemSettingsPath)) {
+            DebugLog.log("[PermissionManager] Opened System Settings app (fallback)")
+        } else {
+            DebugLog.log("[PermissionManager] Failed to open Accessibility settings")
         }
     }
 
     /// Open Privacy & Security overview
     static func openPrivacySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
-            NSWorkspace.shared.open(url)
-            DebugLog.log("[PermissionManager] Opened Privacy settings")
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy"
+        ]
+        if openFirstAvailableURL(candidates, logLabel: "Privacy settings") {
+            return
         }
+
+        let systemSettingsPath = "/System/Applications/System Settings.app"
+        if NSWorkspace.shared.open(URL(fileURLWithPath: systemSettingsPath)) {
+            DebugLog.log("[PermissionManager] Opened System Settings app (fallback)")
+        } else {
+            DebugLog.log("[PermissionManager] Failed to open Privacy settings")
+        }
+    }
+
+    /// Try URL candidates in order and open the first one that succeeds.
+    @discardableResult
+    private static func openFirstAvailableURL(_ candidates: [String], logLabel: String) -> Bool {
+        for raw in candidates {
+            guard let url = URL(string: raw) else { continue }
+            if NSWorkspace.shared.open(url) {
+                DebugLog.log("[PermissionManager] Opened \(logLabel): \(raw)")
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Diagnostics

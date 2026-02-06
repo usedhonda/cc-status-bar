@@ -18,8 +18,8 @@ enum CodexObserver {
 
     // MARK: - Public API
 
-    /// Get all active Codex sessions indexed by cwd
-    /// - Returns: Dictionary of cwd -> CodexSession
+    /// Get all active Codex sessions indexed by internal id
+    /// - Returns: Dictionary of session key -> CodexSession
     static func getActiveSessions() -> [String: CodexSession] {
         let now = Date()
 
@@ -44,14 +44,17 @@ enum CodexObserver {
     /// - Parameter cwd: The working directory to check
     /// - Returns: true if Codex is running in that directory
     static func isCodexRunning(for cwd: String) -> Bool {
-        return getActiveSessions()[cwd] != nil
+        return getActiveSessions().values.contains { $0.cwd == cwd }
     }
 
     /// Get Codex session for a specific cwd
     /// - Parameter cwd: The working directory
     /// - Returns: CodexSession if running, nil otherwise
     static func getCodexSession(for cwd: String) -> CodexSession? {
-        return getActiveSessions()[cwd]
+        return getActiveSessions().values
+            .filter { $0.cwd == cwd }
+            .sorted { $0.pid < $1.pid }
+            .first
     }
 
     /// Get CodexInfo for WebSocket output
@@ -103,7 +106,8 @@ enum CodexObserver {
                     }
                 }
 
-                sessions[cwd] = session
+                let key = "codex:\(pid)"
+                sessions[key] = session
                 DebugLog.log("[CodexObserver] Found Codex PID \(pid) in \(session.projectName)")
             }
         }
@@ -129,12 +133,30 @@ enum CodexObserver {
 
     /// Get PIDs of running Codex processes
     private static func getCodexPIDs() -> [pid_t] {
-        // pgrep for codex vendor processes
-        let output = runCommand("/usr/bin/pgrep", ["-f", "codex/vendor.*codex"])
-        let pids = output
-            .split(separator: "\n")
-            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
-        return pids
+        var pidSet = Set<pid_t>()
+
+        // Current Codex CLI typically runs as a direct executable named "codex"
+        // (or occasionally "codex-cli"), so prioritize exact process-name matches.
+        for processName in ["codex", "codex-cli"] {
+            let output = runCommand("/usr/bin/pgrep", ["-x", processName])
+            for line in output.split(separator: "\n") {
+                if let pid = pid_t(line.trimmingCharacters(in: .whitespaces)) {
+                    pidSet.insert(pid)
+                }
+            }
+        }
+
+        // Backward compatibility: legacy Node/vendor launch patterns.
+        for pattern in ["codex/vendor.*codex", "@openai/codex"] {
+            let output = runCommand("/usr/bin/pgrep", ["-f", pattern])
+            for line in output.split(separator: "\n") {
+                if let pid = pid_t(line.trimmingCharacters(in: .whitespaces)) {
+                    pidSet.insert(pid)
+                }
+            }
+        }
+
+        return Array(pidSet).sorted()
     }
 
     /// Get current working directory for a process

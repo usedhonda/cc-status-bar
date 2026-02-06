@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum TmuxHelper {
     struct PaneInfo {
@@ -6,12 +7,14 @@ enum TmuxHelper {
         let window: String
         let pane: String
         let windowName: String  // tmux window name
+        let socketPath: String?  // tmux socket path (for non-default servers)
 
-        init(session: String, window: String, pane: String, windowName: String = "") {
+        init(session: String, window: String, pane: String, windowName: String = "", socketPath: String? = nil) {
             self.session = session
             self.window = window
             self.pane = pane
             self.windowName = windowName
+            self.socketPath = socketPath
         }
     }
 
@@ -39,6 +42,10 @@ enum TmuxHelper {
     private static var attachStatesCache: (states: [String: Bool], timestamp: Date)?
     private static let attachStatesCacheTTL: TimeInterval = 5.0
 
+    /// Cache for discovered tmux socket paths (TTL: 30 seconds)
+    private static var socketPathsCache: (paths: [String], timestamp: Date)?
+    private static let socketPathsCacheTTL: TimeInterval = 30.0
+
     /// Invalidate pane info cache (called when session file changes)
     static func invalidatePaneInfoCache() {
         paneInfoCache.removeAll()
@@ -50,6 +57,7 @@ enum TmuxHelper {
         paneInfoCache.removeAll()
         terminalCache.removeAll()
         attachStatesCache = nil
+        socketPathsCache = nil
         DebugLog.log("[TmuxHelper] All caches invalidated")
     }
 
@@ -63,34 +71,42 @@ enum TmuxHelper {
     /// TTY から tmux ペイン情報を取得 (with caching)
     static func getPaneInfo(for tty: String) -> PaneInfo? {
         let now = Date()
+        let normalizedTTY = normalizeTTY(tty)
 
         // Check cache
-        if let cached = paneInfoCache[tty],
+        if let cached = paneInfoCache[normalizedTTY],
            now.timeIntervalSince(cached.timestamp) < paneCacheTTL {
-            DebugLog.log("[TmuxHelper] Cache hit for TTY \(tty)")
+            DebugLog.log("[TmuxHelper] Cache hit for TTY \(normalizedTTY)")
             return cached.info
         }
 
         // Cache miss - fetch from tmux
-        let info = fetchPaneInfoFromTmux(tty)
-        paneInfoCache[tty] = (info, now)
+        let info = fetchPaneInfoFromTmux(normalizedTTY)
+        paneInfoCache[normalizedTTY] = (info, now)
         return info
     }
 
     /// Fetch pane info directly from tmux (no cache)
     private static func fetchPaneInfoFromTmux(_ tty: String) -> PaneInfo? {
         // Use tab separator to handle window names containing "|"
-        let output = runCommand(tmuxPath, ["list-panes", "-a",
-            "-F", "#{pane_tty}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}"])
+        let format = "#{pane_tty}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}"
+        let commandArgs = ["list-panes", "-a", "-F", format]
 
-        for line in output.split(separator: "\n") {
-            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            if parts.count >= 5 && parts[0] == tty {
-                DebugLog.log("[TmuxHelper] Found pane: \(parts[1]):\(parts[2]).\(parts[3]) (window: \(parts[4])) for TTY \(tty)")
-                return PaneInfo(session: parts[1], window: parts[2], pane: parts[3], windowName: parts[4])
+        // 1) Try default tmux server (works when TMUX env is available)
+        let defaultOutput = runTmuxCommandArgs(commandArgs)
+        if let info = parsePaneInfo(from: defaultOutput, matchingTTY: tty, socketPath: nil) {
+            return info
+        }
+
+        // 2) Fallback: search known socket files (works from GUI process without TMUX env)
+        for socketPath in discoverSocketPaths() {
+            let output = runTmuxCommandArgs(commandArgs, socketPath: socketPath)
+            if let info = parsePaneInfo(from: output, matchingTTY: tty, socketPath: socketPath) {
+                return info
             }
         }
-        DebugLog.log("[TmuxHelper] No pane found for TTY \(tty)")
+
+        DebugLog.log("[TmuxHelper] No pane found for TTY \(tty) (checked default + discovered sockets)")
         return nil
     }
 
@@ -100,12 +116,16 @@ enum TmuxHelper {
         let paneTarget = "\(info.session):\(info.window).\(info.pane)"
 
         // 1. ウィンドウを選択（タブ切り替え）
-        _ = runCommand(tmuxPath, ["select-window", "-t", windowTarget])
+        _ = runTmuxCommandArgs(["select-window", "-t", windowTarget], socketPath: info.socketPath)
 
         // 2. ペインを選択
-        _ = runCommand(tmuxPath, ["select-pane", "-t", paneTarget])
+        _ = runTmuxCommandArgs(["select-pane", "-t", paneTarget], socketPath: info.socketPath)
 
-        DebugLog.log("[TmuxHelper] Selected pane: \(paneTarget)")
+        if let socketPath = info.socketPath {
+            DebugLog.log("[TmuxHelper] Selected pane: \(paneTarget) via socket \(socketPath)")
+        } else {
+            DebugLog.log("[TmuxHelper] Selected pane: \(paneTarget)")
+        }
         return true
     }
 
@@ -153,14 +173,22 @@ enum TmuxHelper {
             return cached.states
         }
 
-        let output = runCommand(tmuxPath, ["list-sessions", "-F", "#{session_name}|#{session_attached}"])
         var states: [String: Bool] = [:]
-        for line in output.split(separator: "\n") {
-            let parts = line.split(separator: "|").map(String.init)
-            if parts.count == 2 {
-                states[parts[0]] = (parts[1] == "1")
-            }
+
+        // 1) Default server (or TMUX env-derived server)
+        mergeAttachStates(
+            from: runTmuxCommandArgs(["list-sessions", "-F", "#{session_name}|#{session_attached}"]),
+            into: &states
+        )
+
+        // 2) Additional sockets for GUI context without TMUX env
+        for socketPath in discoverSocketPaths() {
+            mergeAttachStates(
+                from: runTmuxCommandArgs(["list-sessions", "-F", "#{session_name}|#{session_attached}"], socketPath: socketPath),
+                into: &states
+            )
         }
+
         attachStatesCache = (states, now)
         DebugLog.log("[TmuxHelper] Fetched attach states: \(states)")
         return states
@@ -180,7 +208,7 @@ enum TmuxHelper {
 
     /// Run a tmux command and return output
     static func runTmuxCommand(_ args: String...) -> String {
-        return runCommand(tmuxPath, args)
+        return runTmuxCommandArgs(args)
     }
 
     /// Send keys to a tmux pane
@@ -191,7 +219,7 @@ enum TmuxHelper {
     @discardableResult
     static func sendKeys(_ paneInfo: PaneInfo, keys: String) -> Bool {
         let target = "\(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)"
-        _ = runCommand(tmuxPath, ["send-keys", "-t", target, keys])
+        _ = runTmuxCommandArgs(["send-keys", "-t", target, keys], socketPath: paneInfo.socketPath)
         DebugLog.log("[TmuxHelper] Sent keys '\(keys)' to \(target)")
         return true
     }
@@ -200,25 +228,40 @@ enum TmuxHelper {
     /// - Parameter sessionName: The tmux session name (e.g., "chrome-ai-bridge")
     /// - Returns: Terminal identifier (e.g., "ghostty", "iTerm.app") or nil
     static func getClientTerminalInfo(for sessionName: String) -> String? {
-        // Get all clients with their PID and session
-        let output = runCommand(tmuxPath, ["list-clients", "-F", "#{client_pid}|#{client_session}"])
+        // Get all clients with their PID and session.
+        // Try default server first, then discovered socket files.
+        var clientOutputs: [String] = []
+        clientOutputs.append(runTmuxCommandArgs(["list-clients", "-F", "#{client_pid}|#{client_session}"]))
+        for socketPath in discoverSocketPaths() {
+            clientOutputs.append(runTmuxCommandArgs(["list-clients", "-F", "#{client_pid}|#{client_session}"], socketPath: socketPath))
+        }
 
         // Find the client attached to this session
         var clientPid: pid_t?
-        for line in output.split(separator: "\n") {
-            let parts = line.split(separator: "|").map(String.init)
-            if parts.count >= 2 && parts[1] == sessionName {
-                clientPid = pid_t(parts[0])
+        for output in clientOutputs {
+            for line in output.split(separator: "\n") {
+                let parts = line.split(separator: "|").map(String.init)
+                if parts.count >= 2 && parts[1] == sessionName {
+                    clientPid = pid_t(parts[0])
+                    break
+                }
+            }
+            if clientPid != nil {
                 break
             }
         }
 
         // If no client found for this session, try any client (tmux may share clients)
         if clientPid == nil {
-            for line in output.split(separator: "\n") {
-                let parts = line.split(separator: "|").map(String.init)
-                if parts.count >= 1, let pid = pid_t(parts[0]) {
-                    clientPid = pid
+            for output in clientOutputs {
+                for line in output.split(separator: "\n") {
+                    let parts = line.split(separator: "|").map(String.init)
+                    if parts.count >= 1, let pid = pid_t(parts[0]) {
+                        clientPid = pid
+                        break
+                    }
+                }
+                if clientPid != nil {
                     break
                 }
             }
@@ -293,19 +336,142 @@ enum TmuxHelper {
         return nil
     }
 
+    private static func normalizeTTY(_ tty: String) -> String {
+        let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.hasPrefix("/dev/") {
+            return trimmed
+        }
+        if trimmed.hasPrefix("dev/") {
+            return "/\(trimmed)"
+        }
+        return "/dev/\(trimmed)"
+    }
+
+    private static func parsePaneInfo(from output: String, matchingTTY tty: String, socketPath: String?) -> PaneInfo? {
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 5 else { continue }
+            if normalizeTTY(parts[0]) == tty {
+                DebugLog.log("[TmuxHelper] Found pane: \(parts[1]):\(parts[2]).\(parts[3]) (window: \(parts[4])) for TTY \(tty)")
+                return PaneInfo(
+                    session: parts[1],
+                    window: parts[2],
+                    pane: parts[3],
+                    windowName: parts[4],
+                    socketPath: socketPath
+                )
+            }
+        }
+        return nil
+    }
+
+    private static func mergeAttachStates(from output: String, into states: inout [String: Bool]) {
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: "|").map(String.init)
+            guard parts.count == 2 else { continue }
+            let attached = (parts[1] == "1")
+            // Keep `true` if any socket reports the session as attached
+            states[parts[0]] = (states[parts[0]] ?? false) || attached
+        }
+    }
+
+    private static func discoverSocketPaths() -> [String] {
+        let now = Date()
+        if let cached = socketPathsCache,
+           now.timeIntervalSince(cached.timestamp) < socketPathsCacheTTL {
+            return cached.paths
+        }
+
+        var candidates: [String] = []
+
+        // If TMUX env exists (CLI context), prioritize that socket.
+        if let tmuxEnv = ProcessInfo.processInfo.environment["TMUX"],
+           let rawSocket = tmuxEnv.split(separator: ",", maxSplits: 1).first {
+            let socketPath = String(rawSocket)
+            if !socketPath.isEmpty {
+                candidates.append(socketPath)
+            }
+        }
+
+        let uid = Int(getuid())
+        let socketDirs = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+        let fileManager = FileManager.default
+
+        for dir in socketDirs {
+            var isDirectory = ObjCBool(false)
+            guard fileManager.fileExists(atPath: dir, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+
+            if let entries = try? fileManager.contentsOfDirectory(atPath: dir) {
+                for entry in entries {
+                    let path = (dir as NSString).appendingPathComponent(entry)
+                    candidates.append(path)
+                }
+            }
+        }
+
+        // Explicit defaults as final fallback
+        candidates.append("/private/tmp/tmux-\(uid)/default")
+        candidates.append("/tmp/tmux-\(uid)/default")
+
+        var uniquePaths: [String] = []
+        var seen = Set<String>()
+        for path in candidates {
+            let normalizedPath = (path as NSString).standardizingPath
+            guard !normalizedPath.isEmpty else { continue }
+            guard !seen.contains(normalizedPath) else { continue }
+            guard fileManager.fileExists(atPath: normalizedPath) else { continue }
+            seen.insert(normalizedPath)
+            uniquePaths.append(normalizedPath)
+        }
+
+        socketPathsCache = (uniquePaths, now)
+        return uniquePaths
+    }
+
+    private static func runTmuxCommandArgs(_ args: [String], socketPath: String? = nil) -> String {
+        var fullArgs: [String] = []
+        if let socketPath = socketPath, !socketPath.isEmpty {
+            fullArgs += ["-S", socketPath]
+        }
+        fullArgs += args
+        return runCommand(tmuxPath, fullArgs)
+    }
+
     private static func runCommand(_ executable: String, _ args: [String]) -> String {
         let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = Array(args)
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+
+        if executable.contains("/") {
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = Array(args)
+        } else {
+            // Fallback to PATH lookup (important when tmux is not in hardcoded locations)
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [executable] + Array(args)
+        }
+
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
 
         do {
             try process.run()
             process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
+
+            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: outputData, encoding: .utf8) ?? ""
+            let errorOutput = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if process.terminationStatus != 0, !errorOutput.isEmpty {
+                DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args) | \(errorOutput)")
+            }
+
+            return output
         } catch {
             DebugLog.log("[TmuxHelper] Command failed: \(executable) \(args)")
             return ""
