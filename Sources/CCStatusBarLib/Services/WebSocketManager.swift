@@ -278,7 +278,13 @@ final class WebSocketManager {
     func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
         // Get status from CodexStatusReceiver
         let status = CodexStatusReceiver.shared.getStatus(for: session.cwd)
-        let attentionLevel = status == .waitingInput ? 1 : 0  // yellow or green
+        let waitingReason = CodexStatusReceiver.shared.getWaitingReason(for: session.cwd)
+        let attentionLevel: Int
+        if status == .waitingInput {
+            attentionLevel = (waitingReason == .permissionPrompt) ? 2 : 1  // red or yellow
+        } else {
+            attentionLevel = 0
+        }
 
         // Use detected terminal app, or fallback to "Codex"
         let terminalName = session.terminalApp ?? "Codex"
@@ -297,6 +303,10 @@ final class WebSocketManager {
 
         if let sessionId = session.sessionId {
             dict["session_id"] = sessionId
+        }
+
+        if status == .waitingInput {
+            dict["waiting_reason"] = (waitingReason ?? .unknown).rawValue
         }
 
         // Add TTY if available
