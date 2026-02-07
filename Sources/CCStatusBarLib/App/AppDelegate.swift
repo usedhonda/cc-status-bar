@@ -97,6 +97,20 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: .focusSession,
             object: nil
         )
+
+        // Watch for Codex background refresh completion to update UI
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(codexSessionsDidUpdate),
+            name: .codexSessionsDidUpdate,
+            object: nil
+        )
+
+        // Pre-warm Codex session cache in background
+        DispatchQueue.global(qos: .utility).async {
+            _ = CodexObserver.getActiveSessions()
+            DebugLog.log("[AppDelegate] Cache pre-warm complete")
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
@@ -1290,6 +1304,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refreshUI()
             DebugLog.log("[AppDelegate] Focused session via notification click: \(session.projectName)")
         }
+    }
+
+    // MARK: - Codex Background Refresh
+
+    @MainActor @objc private func codexSessionsDidUpdate() {
+        scheduleMenuRebuild()
     }
 
     // MARK: - Duplicate Instance Prevention

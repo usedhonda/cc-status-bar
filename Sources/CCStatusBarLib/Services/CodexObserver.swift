@@ -6,30 +6,44 @@ import Combine
 enum CodexObserver {
     // MARK: - Cache
 
-    /// Cache for active Codex sessions (TTL: 5 seconds)
+    /// Cache for active Codex sessions (3-state: fresh / stale / empty)
     private static var sessionsCache: (sessions: [String: CodexSession], timestamp: Date)?
-    private static let cacheTTL: TimeInterval = 5.0
+    private static let freshTTL: TimeInterval = 5.0    // Fresh: return immediately
+    private static let staleTTL: TimeInterval = 30.0   // Stale: return cached, refresh in background
+    private static var isRefreshing = false             // Prevent concurrent background refreshes
 
-    /// Invalidate the cache
+    /// Mark cache as stale (don't clear — stale data is still returned immediately)
     static func invalidateCache() {
-        sessionsCache = nil
-        DebugLog.log("[CodexObserver] Cache invalidated")
+        if let cached = sessionsCache {
+            sessionsCache = (cached.sessions, cached.timestamp.addingTimeInterval(-freshTTL))
+            DebugLog.log("[CodexObserver] Cache marked stale")
+        }
     }
 
     // MARK: - Public API
 
     /// Get all active Codex sessions indexed by internal id
+    /// Uses stale-while-revalidate: returns cached data immediately and refreshes in background
     /// - Returns: Dictionary of session key -> CodexSession
     static func getActiveSessions() -> [String: CodexSession] {
         let now = Date()
 
-        // Check cache
-        if let cached = sessionsCache,
-           now.timeIntervalSince(cached.timestamp) < cacheTTL {
-            return cached.sessions
+        if let cached = sessionsCache {
+            let age = now.timeIntervalSince(cached.timestamp)
+
+            if age < freshTTL {
+                // Fresh: return immediately
+                return cached.sessions
+            }
+
+            if age < staleTTL {
+                // Stale: return cached data, trigger background refresh
+                triggerBackgroundRefresh()
+                return cached.sessions
+            }
         }
 
-        // Fetch from system
+        // Empty or expired: synchronous fetch (unavoidable on first call)
         let sessions = fetchCodexSessions()
         sessionsCache = (sessions, now)
 
@@ -70,6 +84,26 @@ enum CodexObserver {
             startedAt: session.startedAt,
             sessionId: session.sessionId
         )
+    }
+
+    // MARK: - Background Refresh
+
+    /// Trigger a background refresh of Codex sessions (stale-while-revalidate)
+    private static func triggerBackgroundRefresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+
+        DispatchQueue.global(qos: .utility).async {
+            let sessions = fetchCodexSessions()
+            let now = Date()
+
+            DispatchQueue.main.async {
+                sessionsCache = (sessions, now)
+                isRefreshing = false
+                NotificationCenter.default.post(name: .codexSessionsDidUpdate, object: nil)
+                DebugLog.log("[CodexObserver] Background refresh complete (\(sessions.count) sessions)")
+            }
+        }
     }
 
     // MARK: - Private
@@ -298,4 +332,10 @@ enum CodexObserver {
             return ""
         }
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let codexSessionsDidUpdate = Notification.Name("codexSessionsDidUpdate")
 }
