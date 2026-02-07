@@ -318,12 +318,9 @@ final class WebSocketManager {
         if let tmuxSession = session.tmuxSession,
            let tmuxWindow = session.tmuxWindow,
            let tmuxPane = session.tmuxPane {
-            let attachCmd: String
-            if let socketPath = session.tmuxSocketPath {
-                attachCmd = "tmux -S \(socketPath) attach -t \(tmuxSession):\(tmuxWindow).\(tmuxPane)"
-            } else {
-                attachCmd = "tmux attach -t \(tmuxSession):\(tmuxWindow).\(tmuxPane)"
-            }
+            let attachCmd = TmuxAttachCommand.buildFull(
+                sessionName: tmuxSession, window: tmuxWindow, pane: tmuxPane, socketPath: session.tmuxSocketPath
+            )
             dict["tmux"] = [
                 "session": tmuxSession,
                 "window": tmuxWindow,

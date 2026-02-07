@@ -13,4 +13,20 @@ final class CodexObserverTests: XCTestCase {
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex mcp-server --stdio"))
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("/opt/homebrew/bin/codex mcp-server --stdio"))
     }
+
+    func testShouldTrackCodexWithMCPServerInPath() {
+        // "mcp-server" appears in a path argument, not as a standalone subcommand
+        XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex --cwd /projects/mcp-server-demo"))
+        XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex --cwd /home/user/mcp-server"))
+    }
+
+    func testShouldNotTrackCodexMCPServerSubcommand() {
+        // "mcp-server" as a standalone token (subcommand)
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex mcp-server --stdio"))
+    }
+
+    func testShouldTrackCodexEmptyAndWhitespace() {
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine(""))
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("   "))
+    }
 }

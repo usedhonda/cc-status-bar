@@ -5,7 +5,7 @@ set -e
 # This script is used by both pre-push hook and GitHub Actions
 
 echo "=== Swift Tests ==="
-swift test
+swift test -Xswiftc -warnings-as-errors
 
 echo ""
 echo "=== TypeScript Build Check ==="

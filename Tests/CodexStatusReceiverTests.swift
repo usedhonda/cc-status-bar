@@ -30,4 +30,30 @@ final class CodexStatusReceiverTests: XCTestCase {
         ])
         XCTAssertEqual(reason, .permissionPrompt)
     }
+
+    @MainActor
+    func testInferWaitingReasonFromArrayPayload() {
+        let reason = CodexStatusReceiver.inferWaitingReason(from: [
+            "type": "agent-turn-complete",
+            "items": ["something", "permission_prompt", "other"]
+        ])
+        XCTAssertEqual(reason, .permissionPrompt)
+    }
+
+    @MainActor
+    func testInferWaitingReasonEmptyPayload() {
+        let reason = CodexStatusReceiver.inferWaitingReason(from: [:])
+        XCTAssertEqual(reason, .stop)
+    }
+
+    @MainActor
+    func testInferWaitingReasonUnrelatedKeys() {
+        let reason = CodexStatusReceiver.inferWaitingReason(from: [
+            "type": "agent-turn-complete",
+            "thread-id": "abc-123",
+            "cwd": "/tmp/project",
+            "metadata": ["key": "value"]
+        ])
+        XCTAssertEqual(reason, .stop)
+    }
 }

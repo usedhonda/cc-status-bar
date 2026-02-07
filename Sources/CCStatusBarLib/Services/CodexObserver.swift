@@ -177,10 +177,10 @@ enum CodexObserver {
         let normalized = commandLine.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return false }
 
-        // Claude Code can spawn this for MCP integration. It should not appear as a Codex session.
-        if normalized.contains("mcp-server") {
-            return false
-        }
+        // Tokenize and check if "mcp-server" is a standalone argument (subcommand).
+        // This avoids false exclusion when "mcp-server" appears in paths or other arguments.
+        let tokens = normalized.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        if tokens.contains("mcp-server") { return false }
 
         return true
     }
@@ -254,7 +254,7 @@ enum CodexObserver {
     }
 
     /// Parse a Codex session file to find session ID for a specific cwd
-    private static func parseCodexSessionFile(_ url: URL, lookingForCwd cwd: String) -> String? {
+    static func parseCodexSessionFile(_ url: URL, lookingForCwd cwd: String) -> String? {
         guard let data = try? Data(contentsOf: url),
               let content = String(data: data, encoding: .utf8) else {
             return nil

@@ -1,6 +1,26 @@
 import Foundation
 import Darwin
 
+/// Build tmux attach command strings (pure function, extracted for testability)
+enum TmuxAttachCommand {
+    /// Build tmux attach command string for a session
+    static func build(sessionName: String, socketPath: String?) -> String {
+        if let socket = socketPath {
+            return "tmux -S \(socket) attach -t \(sessionName)"
+        }
+        return "tmux attach -t \(sessionName)"
+    }
+
+    /// Build tmux attach command with full target (session:window.pane)
+    static func buildFull(sessionName: String, window: String, pane: String, socketPath: String?) -> String {
+        let target = "\(sessionName):\(window).\(pane)"
+        if let socket = socketPath {
+            return "tmux -S \(socket) attach -t \(target)"
+        }
+        return "tmux attach -t \(target)"
+    }
+}
+
 enum TmuxHelper {
     struct PaneInfo {
         let session: String
@@ -176,10 +196,7 @@ enum TmuxHelper {
 
         /// Generate the tmux attach command for remote access
         var attachCommand: String {
-            if let socket = socketPath {
-                return "tmux -S \(socket) attach -t \(sessionName)"
-            }
-            return "tmux attach -t \(sessionName)"
+            TmuxAttachCommand.build(sessionName: sessionName, socketPath: socketPath)
         }
 
         /// Generate the full target specifier (session:window.pane)
@@ -366,7 +383,7 @@ enum TmuxHelper {
         return nil
     }
 
-    private static func normalizeTTY(_ tty: String) -> String {
+    static func normalizeTTY(_ tty: String) -> String {
         let trimmed = tty.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
@@ -389,7 +406,7 @@ enum TmuxHelper {
 
     /// Split a `tmux list-panes -F ...` row into 5 columns.
     /// Supports multiple delimiter formats to tolerate environment/version differences.
-    private static func splitPaneColumns(_ line: Substring) -> [String] {
+    static func splitPaneColumns(_ line: Substring) -> [String] {
         let raw = String(line)
 
         // Preferred/current formats
@@ -417,7 +434,7 @@ enum TmuxHelper {
         return []
     }
 
-    private static func parsePaneInfo(from output: String, matchingTTY tty: String, socketPath: String?) -> PaneInfo? {
+    static func parsePaneInfo(from output: String, matchingTTY tty: String, socketPath: String?) -> PaneInfo? {
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
             let parts = splitPaneColumns(line)
             guard parts.count >= 5 else { continue }
@@ -494,7 +511,7 @@ enum TmuxHelper {
         return snapshot
     }
 
-    private static func parseAttachStates(from output: String) -> [String: Bool] {
+    static func parseAttachStates(from output: String) -> [String: Bool] {
         var states: [String: Bool] = [:]
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: "|").map(String.init)
@@ -563,8 +580,17 @@ enum TmuxHelper {
         candidates.append("/private/tmp/tmux-\(uid)/default")
         candidates.append("/tmp/tmux-\(uid)/default")
 
+        let uniquePaths = deduplicatePaths(candidates)
+
+        socketPathsCache = (uniquePaths, now)
+        return uniquePaths
+    }
+
+    /// Deduplicate and normalize socket path candidates (extracted for testability)
+    static func deduplicatePaths(_ candidates: [String]) -> [String] {
         var uniquePaths: [String] = []
         var seen = Set<String>()
+        let fileManager = FileManager.default
         for path in candidates {
             let normalizedPath = (path as NSString).standardizingPath
             guard !normalizedPath.isEmpty else { continue }
@@ -573,8 +599,6 @@ enum TmuxHelper {
             seen.insert(normalizedPath)
             uniquePaths.append(normalizedPath)
         }
-
-        socketPathsCache = (uniquePaths, now)
         return uniquePaths
     }
 

@@ -19,6 +19,11 @@ jobs:
       - name: Install Stream Deck Plugin dependencies
         run: npm ci --prefix StreamDeckPlugin/com.ccstatusbar.sdPlugin
 
+      - name: SwiftLint
+        run: |
+          brew install swiftlint
+          swiftlint lint --reporter github-actions
+
       - name: Run Tests
         run: ./scripts/test.sh
 
