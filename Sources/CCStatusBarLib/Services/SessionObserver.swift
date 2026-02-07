@@ -113,6 +113,21 @@ final class SessionObserver: ObservableObject {
             let storeData = try decoder.decode(StoreData.self, from: data)
             var loadedSessions = storeData.activeSessions
 
+            // Log filtered unknown editor sessions (for diagnostics)
+            let totalNonStopped = storeData.sessions.values.filter { $0.status != .stopped }.count
+            let filteredCount = totalNonStopped - loadedSessions.count
+            if filteredCount > 0 {
+                let unknownBundleIDs = storeData.sessions.values
+                    .filter { session in
+                        session.status != .stopped &&
+                        session.editorBundleID != nil &&
+                        !EditorDetector.shared.isKnownEditor(session.editorBundleID!)
+                    }
+                    .compactMap { $0.editorBundleID }
+                let unique = Set(unknownBundleIDs)
+                DebugLog.log("[SessionObserver] Filtered \(filteredCount) session(s) from unknown editor(s): \(unique.sorted().joined(separator: ", "))")
+            }
+
             // Check for sessions with invalid (stale) TTYs and mark them as stopped
             var sessionsToMarkStopped: [Session] = []
             for session in loadedSessions {
