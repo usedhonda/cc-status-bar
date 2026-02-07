@@ -145,6 +145,19 @@ codesign --force --deep --sign - CCStatusBar.app
 open CCStatusBar.app
 ```
 
+### Build Dev App (CCStatusBarDev.app)
+Build a side-by-side development app with separate bundle ID (`com.ccstatusbar.dev`):
+
+```bash
+./scripts/build-dev-app.sh
+open CCStatusBarDev.app
+```
+
+This dev variant uses separate paths/settings from production:
+- `~/Library/Application Support/CCStatusBarDev`
+- UserDefaults suite: `com.ccstatusbar.dev`
+- Hook command name: `CCStatusBarDev`
+
 ### Stream Deck Plugin (Optional)
 
 If you have an Elgato Stream Deck, install the included plugin:

@@ -754,7 +754,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let paneInfo: TmuxHelper.PaneInfo? = session.tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
 
         // Check if tmux session is detached
-        let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session) } ?? false
+        let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session, socketPath: $0.socketPath) } ?? false
 
         // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
         let theme = AppSettings.colorTheme
@@ -847,7 +847,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Get Codex sessions for menu display
     @MainActor
     private func getCodexSessionsForMenu() -> [CodexSession] {
-        return Array(CodexObserver.getActiveSessions().values)
+        return Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
     }
 
     /// Get Codex session counts for status title
@@ -856,20 +856,25 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard AppSettings.showCodexSessions else { return (0, 0, 0) }
 
         let codexSessions = getCodexSessionsForMenu()
+        var red = 0
         var yellow = 0
         var green = 0
 
         for codexSession in codexSessions {
             let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
             if status == .waitingInput {
-                yellow += 1
+                let waitingReason = CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
+                if waitingReason == .permissionPrompt {
+                    red += 1
+                } else {
+                    yellow += 1
+                }
             } else {
                 green += 1
             }
         }
 
-        // Codex doesn't have red (permission_prompt) distinction
-        return (0, yellow, green)
+        return (red, yellow, green)
     }
 
     @MainActor
@@ -887,7 +892,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Get real-time status from CodexStatusReceiver
         let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
-        let symbolColor: NSColor = (status == .waitingInput) ? theme.yellowColor : theme.greenColor
+        let waitingReason = (status == .waitingInput)
+            ? CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
+            : nil
+        let symbolColor: NSColor
+        if status == .waitingInput {
+            symbolColor = (waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
+        } else {
+            symbolColor = theme.greenColor
+        }
         let symbol = (status == .waitingInput) ? "◐" : "●"
 
         // Icon: Use terminal icon based on detected terminal app
@@ -931,7 +944,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Line 3:   Environment • Status • HH:mm
         let envLabel = env.displayName
-        let statusLabel = (status == .waitingInput) ? "Waiting" : "Running"
+        let statusLabel: String
+        if status == .waitingInput {
+            statusLabel = (waitingReason == .permissionPrompt) ? "Permission" : "Waiting"
+        } else {
+            statusLabel = "Running"
+        }
         let timeStr = Self.timeFormatter.string(from: codexSession.startedAt)
         let infoAttr = NSAttributedString(
             string: "\n   \(envLabel) • \(statusLabel) • \(timeStr)",
@@ -1309,8 +1327,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Update symlink to point to this executable
     private func updateSymlinkToSelf() {
-        let symlinkPath = NSString("~/Library/Application Support/CCStatusBar/bin/CCStatusBar")
-            .expandingTildeInPath
+        let symlinkPath = SetupManager.symlinkURL.path
         guard let executablePath = Bundle.main.executablePath else {
             DebugLog.log("[AppDelegate] Cannot get executable path for symlink update")
             return

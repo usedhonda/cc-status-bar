@@ -115,7 +115,8 @@ enum DebugLog {
                 return arr.contains { entry in
                     guard let innerHooks = entry["hooks"] as? [[String: Any]] else { return false }
                     return innerHooks.contains { hook in
-                        (hook["command"] as? String)?.contains("CCStatusBar") == true
+                        guard let command = hook["command"] as? String else { return false }
+                        return SetupManager.isOwnHookCommand(command)
                     }
                 }
             }

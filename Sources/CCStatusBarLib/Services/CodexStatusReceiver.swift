@@ -6,6 +6,13 @@ enum CodexStatus: String, Codable {
     case waitingInput = "waiting_input"
 }
 
+/// Reason of Codex waiting_input for color distinction (red/yellow)
+enum CodexWaitingReason: String, Codable {
+    case permissionPrompt = "permission_prompt"  // red
+    case stop = "stop"                           // yellow
+    case unknown = "unknown"                     // yellow fallback
+}
+
 /// Tracks status received from Codex notify events
 /// Provides cwd -> status mapping with timeout-based state machine
 @MainActor
@@ -58,14 +65,16 @@ final class CodexStatusReceiver {
 
         let threadId = json["thread-id"] as? String
         let now = Date()
+        let waitingReason = Self.inferWaitingReason(from: json)
 
         statusByCwd[cwd] = CodexSessionStatus(
             status: .waitingInput,
+            waitingReason: waitingReason,
             lastEventAt: now,
             threadId: threadId
         )
 
-        DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd)")
+        DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd) reason=\(waitingReason.rawValue)")
 
         // Invalidate CodexObserver cache to trigger WebSocket update
         CodexObserver.invalidateCache()
@@ -97,6 +106,7 @@ final class CodexStatusReceiver {
         if sessionStatus.status == .waitingInput && elapsed > statusTimeout {
             // Timed out, revert to running
             statusByCwd[cwd]?.status = .running
+            statusByCwd[cwd]?.waitingReason = nil
             return .running
         }
 
@@ -113,9 +123,19 @@ final class CodexStatusReceiver {
         let elapsed = Date().timeIntervalSince(sessionStatus.lastEventAt)
         if sessionStatus.status == .waitingInput && elapsed > statusTimeout {
             statusByCwd[cwd]?.status = .running
+            statusByCwd[cwd]?.waitingReason = nil
         }
 
         return statusByCwd[cwd]
+    }
+
+    /// Get waiting reason for a cwd
+    func getWaitingReason(for cwd: String) -> CodexWaitingReason? {
+        guard let sessionStatus = getSessionStatus(for: cwd),
+              sessionStatus.status == .waitingInput else {
+            return nil
+        }
+        return sessionStatus.waitingReason ?? .unknown
     }
 
     /// Remove status tracking for a cwd (when session ends)
@@ -127,11 +147,49 @@ final class CodexStatusReceiver {
     func clearAll() {
         statusByCwd.removeAll()
     }
+
+    // MARK: - Reason Inference
+
+    /// Infer waiting reason from raw Codex notify payload.
+    /// If no explicit permission/approval token is present, default to yellow (stop).
+    static func inferWaitingReason(from json: [String: Any]) -> CodexWaitingReason {
+        let permissionTokens = [
+            "permission_prompt",
+            "approval_required",
+            "approval_request",
+            "approval-request"
+        ]
+
+        if containsAnyToken(permissionTokens, in: json) {
+            return .permissionPrompt
+        }
+        return .stop
+    }
+
+    private static func containsAnyToken(_ tokens: [String], in value: Any) -> Bool {
+        switch value {
+        case let string as String:
+            let normalized = string.lowercased()
+            return tokens.contains { normalized.contains($0) }
+        case let dict as [String: Any]:
+            for (key, nestedValue) in dict {
+                if containsAnyToken(tokens, in: key) || containsAnyToken(tokens, in: nestedValue) {
+                    return true
+                }
+            }
+            return false
+        case let array as [Any]:
+            return array.contains { containsAnyToken(tokens, in: $0) }
+        default:
+            return false
+        }
+    }
 }
 
 /// Status tracking for a single Codex session
 struct CodexSessionStatus {
     var status: CodexStatus
+    var waitingReason: CodexWaitingReason?
     var lastEventAt: Date
     var threadId: String?
 }

@@ -80,7 +80,7 @@ final class WebSocketManager {
     private let clientQueue = DispatchQueue(label: "com.ccstatusbar.websocket.clients")
 
     private var previousSessions: [String: Session] = [:]
-    private var previousCodexCwds = Set<String>()  // Track Codex sessions by cwd
+    private var previousCodexIDs = Set<String>()  // Track Codex sessions by unique id
     private var knownTerminalTypes = Set<String>()
     private var cancellables = Set<AnyCancellable>()
 
@@ -104,11 +104,12 @@ final class WebSocketManager {
         // Send initial session list with icons (both Claude Code and Codex)
         let claudeSessions = SessionStore.shared.getSessions()
         let codexSessions = CodexObserver.getActiveSessions()
+        let codexSessionList = Array(codexSessions.values).sorted { $0.pid < $1.pid }
 
         var sessionsData = claudeSessions.map { claudeSessionToDict($0) }
-        sessionsData += codexSessions.values.map { codexSessionToDict($0) }
+        sessionsData += codexSessionList.map { codexSessionToDict($0) }
 
-        let icons = generateIcons(claudeSessions: claudeSessions, codexSessions: Array(codexSessions.values))
+        let icons = generateIcons(claudeSessions: claudeSessions, codexSessions: codexSessionList)
         let event = WebSocketEvent(type: .sessionsList, sessions: sessionsData, icons: icons)
         sendToClient(session, event: event)
     }
@@ -197,11 +198,11 @@ final class WebSocketManager {
 
         // --- Codex sessions ---
         let currentCodexSessions = CodexObserver.getActiveSessions()
-        let currentCodexCwds = Set(currentCodexSessions.keys)
+        let currentCodexIDs = Set(currentCodexSessions.keys)
 
         // Detect added Codex sessions
-        for (cwd, codexSession) in currentCodexSessions {
-            if !previousCodexCwds.contains(cwd) {
+        for (id, codexSession) in currentCodexSessions {
+            if !previousCodexIDs.contains(id) {
                 // Check if this is a new terminal type
                 let terminalName = codexSession.terminalApp ?? "Codex"
                 let isNewTerminalType = !knownTerminalTypes.contains(terminalName)
@@ -221,14 +222,14 @@ final class WebSocketManager {
         }
 
         // Detect removed Codex sessions
-        for cwd in previousCodexCwds {
-            if !currentCodexCwds.contains(cwd) {
-                let event = WebSocketEvent(type: .sessionRemoved, sessionId: "codex:\(cwd)")
+        for id in previousCodexIDs {
+            if !currentCodexIDs.contains(id) {
+                let event = WebSocketEvent(type: .sessionRemoved, sessionId: id)
                 broadcast(event: event)
             }
         }
 
-        previousCodexCwds = currentCodexCwds
+        previousCodexIDs = currentCodexIDs
     }
 
     /// Convert Claude Code session to dictionary for WebSocket output
@@ -265,7 +266,7 @@ final class WebSocketManager {
                 "window": remoteInfo.windowIndex,
                 "pane": remoteInfo.paneIndex,
                 "attach_command": remoteInfo.attachCommand,
-                "is_attached": TmuxHelper.isSessionAttached(remoteInfo.sessionName)
+                "is_attached": TmuxHelper.isSessionAttached(remoteInfo.sessionName, socketPath: remoteInfo.socketPath)
             ]
         }
 
@@ -277,14 +278,20 @@ final class WebSocketManager {
     func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
         // Get status from CodexStatusReceiver
         let status = CodexStatusReceiver.shared.getStatus(for: session.cwd)
-        let attentionLevel = status == .waitingInput ? 1 : 0  // yellow or green
+        let waitingReason = CodexStatusReceiver.shared.getWaitingReason(for: session.cwd)
+        let attentionLevel: Int
+        if status == .waitingInput {
+            attentionLevel = (waitingReason == .permissionPrompt) ? 2 : 1  // red or yellow
+        } else {
+            attentionLevel = 0
+        }
 
         // Use detected terminal app, or fallback to "Codex"
         let terminalName = session.terminalApp ?? "Codex"
 
         var dict: [String: Any] = [
             "type": "codex",
-            "id": "codex:\(session.cwd)",
+            "id": "codex:\(session.pid)",
             "pid": session.pid,
             "project": session.projectName,
             "cwd": session.cwd,
@@ -296,6 +303,10 @@ final class WebSocketManager {
 
         if let sessionId = session.sessionId {
             dict["session_id"] = sessionId
+        }
+
+        if status == .waitingInput {
+            dict["waiting_reason"] = (waitingReason ?? .unknown).rawValue
         }
 
         // Add TTY if available
@@ -312,7 +323,7 @@ final class WebSocketManager {
                 "window": tmuxWindow,
                 "pane": tmuxPane,
                 "attach_command": "tmux attach -t \(tmuxSession):\(tmuxWindow).\(tmuxPane)",
-                "is_attached": TmuxHelper.isSessionAttached(tmuxSession)
+                "is_attached": TmuxHelper.isSessionAttached(tmuxSession, socketPath: session.tmuxSocketPath)
             ]
         }
 
