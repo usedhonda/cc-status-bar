@@ -6,7 +6,7 @@
  */
 
 import WebSocket from 'ws';
-import { execSync, exec } from 'child_process';
+import { execSync, exec, ExecException } from 'child_process';
 import { appendFileSync } from 'fs';
 import path from 'path';
 
@@ -331,7 +331,7 @@ function handleKeyDown(action: string, context: string): void {
  * Handle escape key
  */
 function handleEscape(): void {
-    exec(`osascript -e 'tell application "System Events" to key code 53'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 53'`, (error: ExecException | null) => {
         if (error) {
             console.error('Escape key error:', error.message);
         }
@@ -342,7 +342,7 @@ function handleEscape(): void {
  * Handle Shift+Tab key (toggle plan mode)
  */
 function handleShiftTab(): void {
-    exec(`osascript -e 'tell application "System Events" to key code 48 using shift down'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 48 using shift down'`, (error: ExecException | null) => {
         if (error) {
             console.error('Shift+Tab error:', error.message);
         }
@@ -355,7 +355,7 @@ function handleShiftTab(): void {
  */
 function handleFocusWaiting(): void {
     // Simulate the global hotkey (Cmd+Ctrl+C) to use app's unified logic
-    exec(`osascript -e 'tell application "System Events" to key code 8 using {command down, control down}'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 8 using {command down, control down}'`, (error: ExecException | null) => {
         if (error) console.error('Hotkey simulation error:', error.message);
     });
 }
@@ -392,7 +392,7 @@ function handleSessionClick(context: string): void {
  * Handle up arrow key
  */
 function handleScrollUp(): void {
-    exec(`osascript -e 'tell application "System Events" to key code 126'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 126'`, (error: ExecException | null) => {
         if (error) {
             console.error('Up arrow key error:', error.message);
         }
@@ -403,7 +403,7 @@ function handleScrollUp(): void {
  * Handle down arrow key
  */
 function handleScrollDown(): void {
-    exec(`osascript -e 'tell application "System Events" to key code 125'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 125'`, (error: ExecException | null) => {
         if (error) {
             console.error('Down arrow key error:', error.message);
         }
@@ -415,7 +415,7 @@ function handleScrollDown(): void {
  */
 function handleDictation(): void {
     // Use CCStatusBar CLI which handles CGEvent double-Fn tap with AppleScript fallback
-    exec(`"${CLI_PATH}" dictation`, (error) => {
+    exec(`"${CLI_PATH}" dictation`, (error: ExecException | null) => {
         if (error) {
             console.error('Dictation error:', error.message);
         }
@@ -426,7 +426,7 @@ function handleDictation(): void {
  * Handle enter key
  */
 function handleEnter(): void {
-    exec(`osascript -e 'tell application "System Events" to key code 36'`, (error) => {
+    exec(`osascript -e 'tell application "System Events" to key code 36'`, (error: ExecException | null) => {
         if (error) {
             console.error('Enter key error:', error.message);
         }

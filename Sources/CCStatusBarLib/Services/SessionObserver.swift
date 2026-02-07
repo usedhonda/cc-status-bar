@@ -140,7 +140,7 @@ final class SessionObserver: ObservableObject {
         // Invalidate TmuxHelper and CodexObserver caches when session file changes
         TmuxHelper.invalidatePaneInfoCache()
         CodexObserver.invalidateCache()
-        self.codexSessions = Array(CodexObserver.getActiveSessions().values)
+        self.codexSessions = Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
 
         guard FileManager.default.fileExists(atPath: storeFile.path) else {
             sessions = []

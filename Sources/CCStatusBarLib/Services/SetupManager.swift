@@ -56,6 +56,25 @@ final class SetupManager {
 
     private init() {}
 
+    /// Check whether a command string is one of CCStatusBar's hook commands.
+    /// Supports quoted paths with spaces, e.g. "\".../CCStatusBar\" hook Notification".
+    static func isOwnHookCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        return ownHookCommandRegex.firstMatch(in: normalized, options: [], range: range) != nil
+    }
+
+    private static let ownHookCommandRegex: NSRegularExpression = {
+        // Match /CCStatusBar[optional quote] <space> hook <space or end>
+        // Examples:
+        // - "/Users/.../CCStatusBar" hook Notification
+        // - /usr/local/bin/CCStatusBar hook Stop
+        // - CCStatusBar hook Notification
+        let pattern = #"(?:^|/)CCStatusBar(?:["'])?\s+hook(?:\s+|$)"#
+        return try! NSRegularExpression(pattern: pattern)
+    }()
+
     // MARK: - Public API
 
     /// Run setup wizard. Use force=true to reconfigure even if already set up.
@@ -164,7 +183,7 @@ final class SetupManager {
                         if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
                             for hook in innerHooks {
                                 if let command = hook["command"] as? String,
-                                   command.contains("CCStatusBar hook") {
+                                   Self.isOwnHookCommand(command) {
                                     return false // Found our hook
                                 }
                             }
@@ -315,7 +334,7 @@ final class SetupManager {
                     // Remove any existing CCStatusBar hooks from this entry
                     innerHooks = innerHooks.filter { hook in
                         guard let command = hook["command"] as? String else { return true }
-                        if command.contains("CCStatusBar") {
+                        if Self.isOwnHookCommand(command) {
                             hadExistingCCStatusBarHook = true
                             return false
                         }
@@ -560,7 +579,7 @@ final class SetupManager {
                     }
                     return !innerHooks.contains { hook in
                         guard let command = hook["command"] as? String else { return false }
-                        return command.contains("CCStatusBar hook")
+                        return Self.isOwnHookCommand(command)
                     }
                 }
                 if filtered.isEmpty {
