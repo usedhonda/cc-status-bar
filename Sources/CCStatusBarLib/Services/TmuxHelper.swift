@@ -176,7 +176,10 @@ enum TmuxHelper {
 
         /// Generate the tmux attach command for remote access
         var attachCommand: String {
-            "tmux attach -t \(sessionName)"
+            if let socket = socketPath {
+                return "tmux -S \(socket) attach -t \(sessionName)"
+            }
+            return "tmux attach -t \(sessionName)"
         }
 
         /// Generate the full target specifier (session:window.pane)
