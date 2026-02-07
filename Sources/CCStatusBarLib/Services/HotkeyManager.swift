@@ -58,7 +58,7 @@ final class HotkeyManager: ObservableObject {
         }
 
         // Register hotkey
-        var hotkeyID = EventHotKeyID(signature: OSType(0x4343), id: 1)  // "CC"
+        let hotkeyID = EventHotKeyID(signature: OSType(0x4343), id: 1)  // "CC"
 
         let regStatus = RegisterEventHotKey(
             keyCode,

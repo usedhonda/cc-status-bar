@@ -17,56 +17,14 @@ final class SessionObserver: ObservableObject {
     /// Debounce work item for file watch events
     private var loadDebounceWorkItem: DispatchWorkItem?
 
-    var runningCount: Int {
-        sessions.filter { $0.status == .running }.count
-    }
-
-    var waitingCount: Int {
-        sessions.filter { $0.status == .waitingInput }.count
-    }
-
-    /// Waiting sessions that haven't been acknowledged (for menu bar count)
-    var unacknowledgedWaitingCount: Int {
-        sessions.filter {
-            $0.status == .waitingInput && $0.isAcknowledged != true
-        }.count
-    }
-
-    /// Red waiting sessions (permission_prompt) that haven't been acknowledged
-    var unacknowledgedRedCount: Int {
-        sessions.filter {
-            $0.status == .waitingInput &&
-            $0.waitingReason == .permissionPrompt &&
-            $0.isAcknowledged != true
-        }.count
-    }
-
-    /// Yellow waiting sessions (stop/unknown) that haven't been acknowledged
-    var unacknowledgedYellowCount: Int {
-        sessions.filter {
-            $0.status == .waitingInput &&
-            $0.waitingReason != .permissionPrompt &&
-            $0.isAcknowledged != true
-        }.count
-    }
-
-    /// Sessions displayed as green (running + acknowledged waiting)
-    var displayedGreenCount: Int {
-        let running = sessions.filter { $0.status == .running }.count
-        let acknowledgedWaiting = sessions.filter {
-            $0.status == .waitingInput && $0.isAcknowledged == true
-        }.count
-        return running + acknowledgedWaiting
-    }
-
-    /// Sessions with tools actively running (for spinner animation)
-    var toolRunningCount: Int {
-        sessions.filter { $0.isToolRunning == true }.count
-    }
-
-    var hasActiveSessions: Bool {
-        !sessions.isEmpty
-    }
+    var runningCount: Int { sessions.runningCount }
+    var waitingCount: Int { sessions.waitingCount }
+    var unacknowledgedWaitingCount: Int { sessions.unacknowledgedWaitingCount }
+    var unacknowledgedRedCount: Int { sessions.unacknowledgedRedCount }
+    var unacknowledgedYellowCount: Int { sessions.unacknowledgedYellowCount }
+    var displayedGreenCount: Int { sessions.displayedGreenCount }
+    var toolRunningCount: Int { sessions.toolRunningCount }
+    var hasActiveSessions: Bool { sessions.hasActiveSessions }
 
     // MARK: - Acknowledge (for yellow->green on focus)
 
@@ -417,5 +375,58 @@ final class SessionObserver: ObservableObject {
                 self?.loadSessions()
             }
         }
+    }
+}
+
+// MARK: - Session Count Logic (extracted for testability)
+
+extension Array where Element == Session {
+    var runningCount: Int {
+        filter { $0.status == .running }.count
+    }
+
+    var waitingCount: Int {
+        filter { $0.status == .waitingInput }.count
+    }
+
+    /// Waiting sessions that haven't been acknowledged (for menu bar count)
+    var unacknowledgedWaitingCount: Int {
+        filter { $0.status == .waitingInput && $0.isAcknowledged != true }.count
+    }
+
+    /// Red waiting sessions (permission_prompt) that haven't been acknowledged
+    var unacknowledgedRedCount: Int {
+        filter {
+            $0.status == .waitingInput &&
+            $0.waitingReason == .permissionPrompt &&
+            $0.isAcknowledged != true
+        }.count
+    }
+
+    /// Yellow waiting sessions (stop/unknown) that haven't been acknowledged
+    var unacknowledgedYellowCount: Int {
+        filter {
+            $0.status == .waitingInput &&
+            $0.waitingReason != .permissionPrompt &&
+            $0.isAcknowledged != true
+        }.count
+    }
+
+    /// Sessions displayed as green (running + acknowledged waiting)
+    var displayedGreenCount: Int {
+        let running = filter { $0.status == .running }.count
+        let acknowledgedWaiting = filter {
+            $0.status == .waitingInput && $0.isAcknowledged == true
+        }.count
+        return running + acknowledgedWaiting
+    }
+
+    /// Sessions with tools actively running (for spinner animation)
+    var toolRunningCount: Int {
+        filter { $0.isToolRunning == true }.count
+    }
+
+    var hasActiveSessions: Bool {
+        !isEmpty
     }
 }

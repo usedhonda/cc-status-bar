@@ -1,0 +1,32 @@
+# SwiftLint Configuration for CC Status Bar
+
+excluded:
+  - .build
+  - StreamDeckPlugin
+  - Package.swift
+
+disabled_rules:
+  - trailing_comma
+  - identifier_name
+  - type_body_length
+  - file_length
+  - function_body_length
+  - cyclomatic_complexity
+  - nesting
+  - for_where
+  - large_tuple
+  - todo
+  - orphaned_doc_comment
+  - multiple_closures_with_trailing_closure
+  - non_optional_string_data_conversion
+  - implicit_optional_initialization
+
+line_length:
+  warning: 200
+  error: 250
+
+type_name:
+  min_length: 2
+
+force_cast: warning
+force_try: warning
