@@ -50,6 +50,9 @@ enum TmuxHelper {
         return "tmux"  // Fallback to PATH
     }()
 
+    /// Lock to protect all mutable caches from concurrent access
+    private static let cacheLock = NSLock()
+
     /// Cache for pane info by TTY (TTL: 5 seconds)
     private static var paneInfoCache: [String: (info: PaneInfo?, timestamp: Date)] = [:]
     private static let paneCacheTTL: TimeInterval = 5.0
@@ -74,22 +77,28 @@ enum TmuxHelper {
 
     /// Invalidate pane info cache (called when session file changes)
     static func invalidatePaneInfoCache() {
+        cacheLock.lock()
         paneInfoCache.removeAll()
+        cacheLock.unlock()
         DebugLog.log("[TmuxHelper] Pane info cache invalidated")
     }
 
     /// Invalidate all caches
     static func invalidateAllCaches() {
+        cacheLock.lock()
         paneInfoCache.removeAll()
         terminalCache.removeAll()
         attachStatesCache = nil
         socketPathsCache = nil
+        cacheLock.unlock()
         DebugLog.log("[TmuxHelper] All caches invalidated")
     }
 
     /// Invalidate attach states cache only (for menu refresh)
     static func invalidateAttachStatesCache() {
+        cacheLock.lock()
         attachStatesCache = nil
+        cacheLock.unlock()
     }
 
     // MARK: - Pane Info (Cached)
@@ -100,22 +109,27 @@ enum TmuxHelper {
         let normalizedTTY = normalizeTTY(tty)
         guard !normalizedTTY.isEmpty else { return nil }
 
-        // Check cache
+        // Check cache (locked)
+        cacheLock.lock()
         if let cached = paneInfoCache[normalizedTTY],
            now.timeIntervalSince(cached.timestamp) < paneCacheTTL {
+            cacheLock.unlock()
             DebugLog.log("[TmuxHelper] Cache hit for TTY \(normalizedTTY)")
             return cached.info
         }
+        cacheLock.unlock()
 
-        // Cache miss - fetch from tmux
+        // Cache miss - fetch from tmux (outside lock to avoid blocking)
         let info = fetchPaneInfoFromTmux(normalizedTTY)
         // Do not cache misses. Socket paths / tmux servers can change rapidly,
         // and negative caching causes long periods of fallback display.
+        cacheLock.lock()
         if let info {
             paneInfoCache[normalizedTTY] = (info, now)
         } else {
             paneInfoCache.removeValue(forKey: normalizedTTY)
         }
+        cacheLock.unlock()
         return info
     }
 
@@ -321,15 +335,20 @@ enum TmuxHelper {
 
         // Check terminal cache
         let now = Date()
+        cacheLock.lock()
         if let cached = terminalCache[pid],
            now.timeIntervalSince(cached.timestamp) < terminalCacheTTL {
+            cacheLock.unlock()
             DebugLog.log("[TmuxHelper] Terminal cache hit for PID \(pid)")
             return cached.terminal
         }
+        cacheLock.unlock()
 
         // Cache miss - trace parent process chain to find terminal
         let terminalInfo = traceParentToTerminal(pid: pid)
+        cacheLock.lock()
         terminalCache[pid] = (terminalInfo, now)
+        cacheLock.unlock()
         DebugLog.log("[TmuxHelper] Session '\(sessionName)' client PID \(pid) -> terminal: \(terminalInfo ?? "unknown")")
         return terminalInfo
     }
@@ -472,10 +491,13 @@ enum TmuxHelper {
 
     private static func getAttachStatesSnapshot() -> AttachStatesSnapshot {
         let now = Date()
+        cacheLock.lock()
         if let cached = attachStatesCache,
            now.timeIntervalSince(cached.timestamp) < attachStatesCacheTTL {
+            cacheLock.unlock()
             return cached
         }
+        cacheLock.unlock()
 
         let listSessionsArgs = ["list-sessions", "-F", "#{session_name}|#{session_attached}"]
         var statesBySocket: [String: [String: Bool]] = [:]
@@ -506,7 +528,9 @@ enum TmuxHelper {
             mergedStates: merged,
             timestamp: now
         )
+        cacheLock.lock()
         attachStatesCache = snapshot
+        cacheLock.unlock()
         DebugLog.log("[TmuxHelper] Fetched attach states by socket: \(statesBySocket)")
         return snapshot
     }
@@ -541,11 +565,14 @@ enum TmuxHelper {
 
     private static func discoverSocketPaths(forceRefresh: Bool = false) -> [String] {
         let now = Date()
+        cacheLock.lock()
         if !forceRefresh,
            let cached = socketPathsCache,
            now.timeIntervalSince(cached.timestamp) < socketPathsCacheTTL {
+            cacheLock.unlock()
             return cached.paths
         }
+        cacheLock.unlock()
 
         var candidates: [String] = []
 
@@ -582,7 +609,9 @@ enum TmuxHelper {
 
         let uniquePaths = deduplicatePaths(candidates)
 
+        cacheLock.lock()
         socketPathsCache = (uniquePaths, now)
+        cacheLock.unlock()
         return uniquePaths
     }
 
