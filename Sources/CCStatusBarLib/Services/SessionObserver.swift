@@ -128,6 +128,9 @@ final class SessionObserver: ObservableObject {
                 DebugLog.log("[SessionObserver] Filtered \(filteredCount) session(s) from unknown editor(s): \(unique.sorted().joined(separator: ", "))")
             }
 
+            // Filter out agent team subagent sessions (keep only leaders)
+            loadedSessions = AgentTeamFilter.filterSubagents(loadedSessions)
+
             // Check for sessions with invalid (stale) TTYs and mark them as stopped
             var sessionsToMarkStopped: [Session] = []
             for session in loadedSessions {

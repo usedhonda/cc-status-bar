@@ -14,7 +14,7 @@ final class SessionStore {
     // MARK: - Read
 
     func getSessions() -> [Session] {
-        return loadData().activeSessions
+        return AgentTeamFilter.filterSubagents(loadData().activeSessions)
     }
 
     // MARK: - Write (CCSB Protocol)
