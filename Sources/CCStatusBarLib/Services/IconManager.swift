@@ -23,7 +23,8 @@ final class IconManager {
     ///   - size: Icon size (default 16x16)
     /// - Returns: Application icon or nil if not found
     func icon(for bundleID: String, size: CGFloat = 16) -> NSImage? {
-        if let cached = cache[bundleID] {
+        let cacheKey = "\(bundleID)@\(Int(size))"
+        if let cached = cache[cacheKey] {
             return cached
         }
 
@@ -31,7 +32,7 @@ final class IconManager {
             return nil
         }
 
-        cache[bundleID] = icon
+        cache[cacheKey] = icon
         return icon
     }
 

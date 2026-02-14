@@ -1,8 +1,34 @@
 import AppKit
+import Foundation
 
 // MARK: - ITerm2Helper (static API)
 
 enum ITerm2Helper {
+    struct TabDescriptor {
+        let windowIndex: Int
+        let tabIndex: Int
+        let name: String
+    }
+
+    // MARK: - Cache
+
+    private static let cacheLock = NSLock()
+    private static var tabDescriptorsCache: [TabDescriptor]?
+    private static var tabDescriptorsCacheTime: Date = .distantPast
+    private static var ttyTabIndexCache: [String: Int] = [:]
+    private static var ttyTabIndexCacheTime: Date = .distantPast
+    private static let cacheTTL: TimeInterval = 3.0
+
+    /// Invalidate all caches (call when tab state changes, e.g., after focus/select)
+    static func invalidateCache() {
+        cacheLock.lock()
+        tabDescriptorsCache = nil
+        tabDescriptorsCacheTime = .distantPast
+        ttyTabIndexCache.removeAll()
+        ttyTabIndexCacheTime = .distantPast
+        cacheLock.unlock()
+    }
+
     static let bundleIdentifier = "com.googlecode.iterm2"
 
     /// Check if iTerm2 is running
@@ -131,6 +157,16 @@ enum ITerm2Helper {
     static func getTabIndexByTTY(_ tty: String) -> Int? {
         guard isRunning else { return nil }
 
+        // Check cache
+        cacheLock.lock()
+        if Date().timeIntervalSince(ttyTabIndexCacheTime) < cacheTTL,
+           let cached = ttyTabIndexCache[tty] {
+            cacheLock.unlock()
+            DebugLog.log("[ITerm2Helper] TTY tab index cache hit for \(tty)")
+            return cached
+        }
+        cacheLock.unlock()
+
         let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
 
         // Search for session with matching TTY and return its tab index
@@ -172,6 +208,12 @@ enum ITerm2Helper {
             return nil
         }
 
+        // Update cache
+        cacheLock.lock()
+        ttyTabIndexCache[tty] = index
+        ttyTabIndexCacheTime = Date()
+        cacheLock.unlock()
+
         DebugLog.log("[ITerm2Helper] Found tab index \(index) for TTY '\(tty)'")
         return index
     }
@@ -181,48 +223,10 @@ enum ITerm2Helper {
     /// - Parameter sessionName: The session name to search for (e.g., tmux session name)
     /// - Returns: Tab index (0-based) if found, nil otherwise
     static func getTabIndexByName(_ sessionName: String) -> Int? {
-        guard isRunning else { return nil }
-
-        let escapedName = sessionName.replacingOccurrences(of: "\"", with: "\\\"")
-
-        // Search for tab whose name contains the session name and return its index
-        let script = """
-            tell application "iTerm"
-                try
-                    set w to current window
-                    if w is missing value then return "-1"
-                    set tabList to tabs of w
-                    repeat with i from 1 to count of tabList
-                        set t to item i of tabList
-                        set tabName to name of current session of t
-                        if tabName contains "\(escapedName)" then
-                            return (i - 1) as string
-                        end if
-                    end repeat
-                    return "-1"
-                on error errMsg
-                    return "-1"
-                end try
-            end tell
-            """
-
-        guard let appleScript = NSAppleScript(source: script) else {
+        guard let descriptor = findMatchingTab(for: sessionName) else {
             return nil
         }
-
-        var error: NSDictionary?
-        let result = appleScript.executeAndReturnError(&error)
-
-        if error != nil {
-            return nil
-        }
-
-        guard let indexStr = result.stringValue,
-              let index = Int(indexStr),
-              index >= 0 else {
-            return nil
-        }
-
+        let index = descriptor.tabIndex - 1
         DebugLog.log("[ITerm2Helper] Found tab index \(index) for '\(sessionName)'")
         return index
     }
@@ -232,24 +236,93 @@ enum ITerm2Helper {
     /// - Parameter sessionName: The session name to search for (e.g., tmux session name)
     /// - Returns: true if successfully focused
     static func focusSessionByName(_ sessionName: String) -> Bool {
-        let escapedName = sessionName.replacingOccurrences(of: "\"", with: "\\\"")
+        guard let descriptor = findMatchingTab(for: sessionName) else {
+            if let descriptors = listTabDescriptors() {
+                let samples = descriptors.prefix(5).map { $0.name }.joined(separator: " | ")
+                DebugLog.log("[ITerm2Helper] Name search miss '\(sessionName)'; sampled tabs: \(samples)")
+            } else {
+                DebugLog.log("[ITerm2Helper] Name search miss '\(sessionName)'; failed to enumerate tabs")
+            }
+            return false
+        }
 
-        // Search for tab whose name contains the session name
+        if selectTab(windowIndex: descriptor.windowIndex, tabIndex: descriptor.tabIndex) {
+            invalidateCache()  // Tab state changed
+            DebugLog.log("[ITerm2Helper] Successfully focused session with name '\(sessionName)'")
+            return true
+        }
+
+        DebugLog.log("[ITerm2Helper] Failed to select matched tab for '\(sessionName)'")
+        return false
+    }
+
+    static func normalizeNameForMatching(_ value: String) -> String {
+        var text = value.lowercased()
+
+        // Drop obvious decorative leading symbols/emoji and normalize separators.
+        text = text.replacingOccurrences(
+            of: "[^\\p{L}\\p{N}:/._\\-\\s]+",
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func tabNameMatches(_ tabName: String, searchTerm: String) -> Bool {
+        let normalizedTab = normalizeNameForMatching(tabName)
+        let normalizedSearch = normalizeNameForMatching(searchTerm)
+        guard !normalizedTab.isEmpty, !normalizedSearch.isEmpty else { return false }
+
+        if normalizedTab.contains(normalizedSearch) {
+            return true
+        }
+
+        let escaped = NSRegularExpression.escapedPattern(for: normalizedSearch)
+        let pattern = "(^|[\\s:/._-])\(escaped)($|[\\s:/._-])"
+        return normalizedTab.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func findMatchingTab(for searchTerm: String) -> TabDescriptor? {
+        guard let descriptors = listTabDescriptors() else {
+            return nil
+        }
+        return descriptors.first { tabNameMatches($0.name, searchTerm: searchTerm) }
+    }
+
+    private static func listTabDescriptors() -> [TabDescriptor]? {
+        guard isRunning else { return nil }
+
+        // Check cache
+        cacheLock.lock()
+        if Date().timeIntervalSince(tabDescriptorsCacheTime) < cacheTTL,
+           let cached = tabDescriptorsCache {
+            cacheLock.unlock()
+            DebugLog.log("[ITerm2Helper] Tab descriptors cache hit")
+            return cached
+        }
+        cacheLock.unlock()
+
         let script = """
             tell application "iTerm"
                 try
-                    repeat with w in windows
-                        repeat with t in tabs of w
-                            set tabName to name of current session of t
-                            if tabName contains "\(escapedName)" then
-                                select t
-                                select w
-                                activate
-                                return "true"
-                            end if
+                    set outText to ""
+                    repeat with wi from 1 to count of windows
+                        set w to item wi of windows
+                        repeat with ti from 1 to count of tabs of w
+                            set t to item ti of tabs of w
+                            set tabName to ""
+                            try
+                                set tabName to name of current session of t
+                            end try
+                            set outText to outText & (wi as string) & tab & (ti as string) & tab & tabName & linefeed
                         end repeat
                     end repeat
-                    return "false"
+                    return outText
                 on error errMsg
                     return "error: " & errMsg
                 end try
@@ -257,25 +330,83 @@ enum ITerm2Helper {
             """
 
         guard let appleScript = NSAppleScript(source: script) else {
-            DebugLog.log("[ITerm2Helper] Failed to create AppleScript for name search")
+            DebugLog.log("[ITerm2Helper] Failed to create AppleScript for tab enumeration")
+            return nil
+        }
+
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        if let error = error {
+            DebugLog.log("[ITerm2Helper] AppleScript error (tab enumeration): \(error)")
+            return nil
+        }
+
+        let output = result.stringValue ?? ""
+        if output.hasPrefix("error:") {
+            DebugLog.log("[ITerm2Helper] Tab enumeration returned error: \(output)")
+            return nil
+        }
+
+        var descriptors: [TabDescriptor] = []
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 3,
+                  let windowIndex = Int(parts[0]),
+                  let tabIndex = Int(parts[1]) else {
+                continue
+            }
+            descriptors.append(
+                TabDescriptor(
+                    windowIndex: windowIndex,
+                    tabIndex: tabIndex,
+                    name: parts[2]
+                )
+            )
+        }
+
+        // Update cache
+        cacheLock.lock()
+        tabDescriptorsCache = descriptors
+        tabDescriptorsCacheTime = Date()
+        cacheLock.unlock()
+
+        return descriptors
+    }
+
+    private static func selectTab(windowIndex: Int, tabIndex: Int) -> Bool {
+        let script = """
+            tell application "iTerm"
+                try
+                    set w to item \(windowIndex) of windows
+                    set t to item \(tabIndex) of tabs of w
+                    select t
+                    select w
+                    activate
+                    return "true"
+                on error errMsg
+                    return "error: " & errMsg
+                end try
+            end tell
+            """
+
+        guard let appleScript = NSAppleScript(source: script) else {
+            DebugLog.log("[ITerm2Helper] Failed to create AppleScript for tab selection")
             return false
         }
 
         var error: NSDictionary?
         let result = appleScript.executeAndReturnError(&error)
-
         if let error = error {
-            DebugLog.log("[ITerm2Helper] AppleScript error (name search): \(error)")
+            DebugLog.log("[ITerm2Helper] AppleScript error (tab selection): \(error)")
             return false
         }
-
         let resultStr = result.stringValue ?? ""
         if resultStr == "true" {
-            DebugLog.log("[ITerm2Helper] Successfully focused session with name '\(sessionName)'")
             return true
-        } else {
-            DebugLog.log("[ITerm2Helper] Could not find session with name '\(sessionName)': \(resultStr)")
-            return false
         }
+        if !resultStr.isEmpty {
+            DebugLog.log("[ITerm2Helper] Tab selection failed: \(resultStr)")
+        }
+        return false
     }
 }

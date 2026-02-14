@@ -57,10 +57,48 @@ final class EnvironmentResolver {
     static let shared = EnvironmentResolver()
     private init() {}
 
+    // MARK: - Cache
+
+    private struct CacheEntry {
+        let env: FocusEnvironment
+        let time: Date
+    }
+
+    private let cacheLock = NSLock()
+    private var cache: [String: CacheEntry] = [:]
+    private let cacheTTL: TimeInterval = 3.0
+
+    /// Invalidate all cached environments
+    func invalidateCache() {
+        cacheLock.lock()
+        cache.removeAll()
+        cacheLock.unlock()
+    }
+
     /// Resolve the focus environment for a session
     /// - Parameter session: The session to analyze
     /// - Returns: Resolved FocusEnvironment with all necessary information
     func resolve(session: Session) -> FocusEnvironment {
+        // Check cache
+        cacheLock.lock()
+        if let entry = cache[session.id],
+           Date().timeIntervalSince(entry.time) < cacheTTL {
+            cacheLock.unlock()
+            return entry.env
+        }
+        cacheLock.unlock()
+
+        let resolved = resolveUncached(session: session)
+
+        // Update cache
+        cacheLock.lock()
+        cache[session.id] = CacheEntry(env: resolved, time: Date())
+        cacheLock.unlock()
+
+        return resolved
+    }
+
+    private func resolveUncached(session: Session) -> FocusEnvironment {
         // Get tmux info once
         let tmuxPane = session.tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
         let hasTmux = tmuxPane != nil

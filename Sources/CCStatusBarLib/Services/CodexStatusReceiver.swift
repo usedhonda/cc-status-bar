@@ -79,13 +79,20 @@ final class CodexStatusReceiver {
         // Invalidate CodexObserver cache to trigger WebSocket update
         CodexObserver.invalidateCache()
 
-        // Broadcast update to WebSocket clients
+        // Broadcast update to WebSocket clients (with pane capture for waiting_input)
         Task {
             if let codexSession = CodexObserver.getCodexSession(for: cwd) {
-                let event = WebSocketEvent(
-                    type: .sessionUpdated,
-                    session: WebSocketManager.shared.codexSessionToDict(codexSession)
-                )
+                var dict = WebSocketManager.shared.codexSessionToDict(codexSession)
+                // Capture pane for waiting_input transition
+                if let tmuxSession = codexSession.tmuxSession,
+                   let tmuxWindow = codexSession.tmuxWindow,
+                   let tmuxPane = codexSession.tmuxPane {
+                    let target = "\(tmuxSession):\(tmuxWindow).\(tmuxPane)"
+                    if let capture = TmuxHelper.capturePane(target: target, socketPath: codexSession.tmuxSocketPath) {
+                        dict["pane_capture"] = capture
+                    }
+                }
+                let event = WebSocketEvent(type: .sessionUpdated, session: dict)
                 WebSocketManager.shared.broadcast(event: event)
             }
         }

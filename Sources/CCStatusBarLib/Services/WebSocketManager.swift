@@ -8,6 +8,7 @@ enum WebSocketEventType: String {
     case sessionAdded = "session.added"
     case sessionUpdated = "session.updated"
     case sessionRemoved = "session.removed"
+    case sessionProgress = "session.progress"
     case hostInfo = "host_info"
 }
 
@@ -83,6 +84,10 @@ final class WebSocketManager {
     private var previousCodexIDs = Set<String>()  // Track Codex sessions by unique id
     private var knownTerminalTypes = Set<String>()
     private var cancellables = Set<AnyCancellable>()
+
+    // Progress broadcasting
+    private var progressTimer: DispatchSourceTimer?
+    private var lastProgressHashes: [String: Int] = [:]
 
     private init() {}
 
@@ -189,7 +194,17 @@ final class WebSocketManager {
         // Detect updated sessions
         for session in sessions {
             if let previous = previousSessions[session.id], session != previous {
-                let event = WebSocketEvent(type: .sessionUpdated, session: claudeSessionToDict(session))
+                var dict = claudeSessionToDict(session)
+                // Attach pane capture on waiting_input transition
+                if previous.status == .running && session.status == .waitingInput {
+                    if let tty = session.tty, let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
+                        let target = paneInfo.targetSpecifier
+                        if let capture = TmuxHelper.capturePane(target: target, socketPath: paneInfo.socketPath) {
+                            dict["pane_capture"] = capture
+                        }
+                    }
+                }
+                let event = WebSocketEvent(type: .sessionUpdated, session: dict)
                 broadcast(event: event)
             }
         }
@@ -377,6 +392,58 @@ final class WebSocketManager {
             return session.waitingReason == .permissionPrompt ? 2 : 1  // red or yellow
         }
         return 0  // stopped/unknown
+    }
+
+    // MARK: - Progress Broadcasting
+
+    /// Start periodic progress broadcasting for running sessions
+    func startProgressBroadcasting() {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 20, repeating: 20)
+        timer.setEventHandler { [weak self] in
+            Task { @MainActor in self?.broadcastProgress() }
+        }
+        timer.resume()
+        progressTimer = timer
+    }
+
+    private func broadcastProgress() {
+        let allSessions = SessionStore.shared.getSessions().filter { $0.status == .running }
+        let codexSessions = Array(CodexObserver.getActiveSessions().values).filter {
+            CodexStatusReceiver.shared.getStatus(for: $0.cwd) == .running
+        }
+
+        // CC sessions
+        for session in allSessions {
+            guard let tty = session.tty,
+                  let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) else { continue }
+            let target = paneInfo.targetSpecifier
+            guard let capture = TmuxHelper.capturePane(target: target, socketPath: paneInfo.socketPath) else { continue }
+            let hash = capture.hashValue
+            if lastProgressHashes[session.id] == hash { continue }
+            lastProgressHashes[session.id] = hash
+
+            var dict = claudeSessionToDict(session)
+            dict["pane_capture"] = capture
+            broadcast(event: WebSocketEvent(type: .sessionProgress, session: dict))
+        }
+
+        // Codex sessions
+        for session in codexSessions {
+            guard let tmuxSession = session.tmuxSession,
+                  let tmuxWindow = session.tmuxWindow,
+                  let tmuxPane = session.tmuxPane else { continue }
+            let target = "\(tmuxSession):\(tmuxWindow).\(tmuxPane)"
+            guard let capture = TmuxHelper.capturePane(target: target, socketPath: session.tmuxSocketPath) else { continue }
+            let hash = capture.hashValue
+            let key = "codex:\(session.pid)"
+            if lastProgressHashes[key] == hash { continue }
+            lastProgressHashes[key] = hash
+
+            var dict = codexSessionToDict(session)
+            dict["pane_capture"] = capture
+            broadcast(event: WebSocketEvent(type: .sessionProgress, session: dict))
+        }
     }
 
     private func sendToClient(_ client: WebSocketSession, event: WebSocketEvent) {

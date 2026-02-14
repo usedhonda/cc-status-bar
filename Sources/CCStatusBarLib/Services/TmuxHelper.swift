@@ -272,6 +272,13 @@ enum TmuxHelper {
         return runTmuxCommandArgs(args)
     }
 
+    /// Capture pane output (last N lines)
+    static func capturePane(target: String, lines: Int = 50, socketPath: String? = nil) -> String? {
+        let args = ["capture-pane", "-p", "-t", target, "-S", "-\(lines)"]
+        let output = runTmuxCommandArgs(args, socketPath: socketPath)
+        return output.isEmpty ? nil : output
+    }
+
     /// Send keys to a tmux pane
     /// - Parameters:
     ///   - paneInfo: Target pane information
