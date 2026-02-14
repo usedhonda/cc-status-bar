@@ -10,6 +10,8 @@ final class SessionObserver: ObservableObject {
     private let storeFile: URL
     private var fileDescriptor: Int32 = -1
     private var dispatchSource: DispatchSourceFileSystemObject?
+    private var fallbackPollingTimer: Timer?
+    private var lastObservedStoreMTime: Date?
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
     private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
     private var isInitialLoad = true  // Skip notifications on first load to avoid spam at startup
@@ -78,6 +80,7 @@ final class SessionObserver: ObservableObject {
 
     deinit {
         dispatchSource?.cancel()
+        fallbackPollingTimer?.invalidate()
     }
 
     // MARK: - Debounced Load
@@ -185,6 +188,7 @@ final class SessionObserver: ObservableObject {
             previousSessionIds = Set(loadedSessions.map { $0.id })
             previousSessionStatuses = Dictionary(uniqueKeysWithValues: loadedSessions.map { ($0.id, $0.status) })
             sessions = loadedSessions
+            lastObservedStoreMTime = currentStoreModificationDate()
 
             // Check tmux session names for diagnostic warnings
             DiagnosticsManager.shared.checkTmuxSessionNames(sessions: loadedSessions)
@@ -384,15 +388,46 @@ final class SessionObserver: ObservableObject {
 
         source.resume()
         dispatchSource = source
+        startBackupPolling()
     }
 
     private func startPolling() {
         // Fallback polling mechanism
-        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        fallbackPollingTimer?.invalidate()
+        fallbackPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.loadSessions()
             }
         }
+    }
+
+    private func startBackupPolling() {
+        // Backup polling in case filesystem events are missed after file replacement.
+        fallbackPollingTimer?.invalidate()
+        fallbackPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let currentMTime = self.currentStoreModificationDate() else { return }
+
+                if self.lastObservedStoreMTime == nil {
+                    self.lastObservedStoreMTime = currentMTime
+                    return
+                }
+
+                if currentMTime > self.lastObservedStoreMTime! {
+                    DebugLog.log("[SessionObserver] Backup polling detected sessions.json change")
+                    self.loadSessions()
+                }
+            }
+        }
+    }
+
+    private func currentStoreModificationDate() -> Date? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: storeFile.path),
+              let modified = attrs[.modificationDate] as? Date else {
+            return nil
+        }
+        return modified
     }
 }
 

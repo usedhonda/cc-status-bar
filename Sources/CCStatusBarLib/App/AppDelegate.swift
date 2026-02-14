@@ -74,6 +74,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Start WebSocket session observation (for iOS app real-time updates)
         WebSocketManager.shared.observeSessions(sessionObserver.$sessions)
 
+        // Start progress broadcasting for running sessions (20s interval)
+        WebSocketManager.shared.startProgressBroadcasting()
+
         // Watch for terminal app activation to auto-acknowledge sessions
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -791,7 +794,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Set icon using NSMenuItem.image (auto-aligned by macOS)
         let env = EnvironmentResolver.shared.resolve(session: session)
-        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48, badgeText: "CC") {
+        if let icon = IconManager.shared.iconWithBadge(for: env, size: 36, badgeText: "CC") {
             item.image = icon
         }
 
@@ -919,7 +922,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Icon: Use terminal icon based on detected terminal app
         let env = CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
-        if let icon = IconManager.shared.iconWithBadge(for: env, size: 48, badgeText: "Cdx") {
+        if let icon = IconManager.shared.iconWithBadge(for: env, size: 36, badgeText: "Cdx") {
             item.image = icon
         }
 

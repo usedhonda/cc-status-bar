@@ -1,9 +1,12 @@
 import AppKit
+import Foundation
 
 /// Terminal controller for iTerm2
 /// Uses AppleScript for session/tab switching
 final class ITerm2Controller: TerminalController {
     static let shared = ITerm2Controller()
+    static let focusRetryAttempts = 4
+    static let focusRetryDelaySeconds = 0.2
 
     let name = "iTerm2"
     let bundleIdentifier = "com.googlecode.iterm2"
@@ -31,45 +34,39 @@ final class ITerm2Controller: TerminalController {
         }
 
         let projectName = session.projectName
+        var paneSelected = false
 
         // 1. Select tmux pane if needed (already known via resolver)
         if hasTmux, let tty = session.tty, let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-            _ = TmuxHelper.selectPane(paneInfo)
-            DebugLog.log("[ITerm2Controller] Selected tmux pane")
-        }
-
-        // 2. Try TTY-based search (works for non-tmux sessions)
-        if let tty = session.tty {
-            if ITerm2Helper.focusSessionByTTY(tty) {
-                DebugLog.log("[ITerm2Controller] Focused session by TTY '\(tty)'")
-                return .success
+            paneSelected = TmuxHelper.selectPane(paneInfo)
+            if paneSelected {
+                DebugLog.log("[ITerm2Controller] Selected tmux pane")
             }
         }
 
-        // 3. Try name-based search (tmux session name or project name)
-        let searchTerm = tmuxSessionName ?? projectName
-        if ITerm2Helper.focusSessionByName(searchTerm) {
-            DebugLog.log("[ITerm2Controller] Focused session by name '\(searchTerm)'")
-            return .success
+        // 2. Try focus with short retries to absorb slow iTerm2 tab updates.
+        for attempt in 0..<Self.focusRetryAttempts {
+            if tryFocusSession(session: session, tmuxSessionName: tmuxSessionName, projectName: projectName) {
+                return .success
+            }
+            if attempt < Self.focusRetryAttempts - 1 {
+                Thread.sleep(forTimeInterval: Self.focusRetryDelaySeconds)
+            }
         }
 
-        // 4. If tmux session name didn't work, try project name as fallback
-        if tmuxSessionName != nil && ITerm2Helper.focusSessionByName(projectName) {
-            DebugLog.log("[ITerm2Controller] Focused session by project name '\(projectName)'")
-            return .success
-        }
-
-        // 5. Fallback: just activate iTerm2
+        // 3. Fallback: just activate iTerm2
         activate()
 
-        // If we at least selected tmux pane, it's partial success
-        if hasTmux {
-            return .partialSuccess(reason: "tmux pane selected, but tab '\(searchTerm)' not found")
+        // If tmux pane selection succeeded, keep it as partial success.
+        if paneSelected {
+            let preferredSearch = tmuxSessionName ?? projectName
+            return .partialSuccess(reason: "tmux pane selected, but tab '\(preferredSearch)' not found after retry")
         }
 
+        let preferredSearch = tmuxSessionName ?? projectName
         let hint = session.tty != nil
-            ? "No session with TTY '\(session.tty!)' or name '\(searchTerm)' found"
-            : "No session matching '\(searchTerm)' found"
+            ? "No session with TTY '\(session.tty!)' or name '\(preferredSearch)' found"
+            : "No session matching '\(preferredSearch)' found"
 
         return .notFound(hint: hint)
     }
@@ -77,5 +74,34 @@ final class ITerm2Controller: TerminalController {
     @discardableResult
     func activate() -> Bool {
         ITerm2Helper.activate()
+    }
+
+    static func searchTerms(tmuxSessionName: String?, projectName: String) -> [String] {
+        var terms: [String] = []
+        if let tmuxSessionName, !tmuxSessionName.isEmpty {
+            terms.append(tmuxSessionName)
+        }
+        if !projectName.isEmpty, !terms.contains(projectName) {
+            terms.append(projectName)
+        }
+        return terms
+    }
+
+    private func tryFocusSession(session: Session, tmuxSessionName: String?, projectName: String) -> Bool {
+        // TTY match first (works best for non-tmux, sometimes for tmux clients)
+        if let tty = session.tty, ITerm2Helper.focusSessionByTTY(tty) {
+            DebugLog.log("[ITerm2Controller] Focused session by TTY '\(tty)'")
+            return true
+        }
+
+        // Then robust name matching (tmux session, then project fallback)
+        for term in Self.searchTerms(tmuxSessionName: tmuxSessionName, projectName: projectName) {
+            if ITerm2Helper.focusSessionByName(term) {
+                DebugLog.log("[ITerm2Controller] Focused session by name '\(term)'")
+                return true
+            }
+        }
+
+        return false
     }
 }
