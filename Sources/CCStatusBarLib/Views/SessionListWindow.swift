@@ -550,6 +550,7 @@ struct PinnedSessionRowView: View {
 
 struct PinnedCodexSessionRowView: View {
     let codexSession: CodexSession
+    @ObservedObject private var statusReceiver = CodexStatusReceiver.shared
     @State private var isHovered = false
     @State private var isPressed = false
 
@@ -689,21 +690,31 @@ struct PinnedCodexSessionRowView: View {
         return codexSession.cwd
     }
 
+    private var isAcked: Bool {
+        CodexStatusReceiver.shared.isAcknowledged(cwd: codexSession.cwd)
+    }
+
+    /// Display status considering acknowledge state
+    private var displayStatus: CodexStatus {
+        (isAcked && status == .waitingInput) ? .running : status
+    }
+
     private var statusLabel: String {
-        if status == .waitingInput {
+        switch displayStatus {
+        case .waitingInput:
             return waitingReason == .permissionPrompt ? "Permission" : "Waiting"
-        }
-        if status == .stopped {
+        case .stopped:
             return "Stopped"
+        case .running:
+            return "Running"
         }
-        return "Running"
     }
 
     private var statusColor: Color {
         if status == .stopped {
             return Color(white: 0.5)
         }
-        if status == .waitingInput {
+        if !isAcked && status == .waitingInput {
             if waitingReason == .permissionPrompt {
                 return Color(red: 1.0, green: 0.3, blue: 0.3)
             }
@@ -718,6 +729,7 @@ struct PinnedCodexSessionRowView: View {
             return
         }
         CodexFocusHelper.focus(session: codexSession)
+        CodexStatusReceiver.shared.acknowledge(cwd: codexSession.cwd)
         DebugLog.log("[SessionListWindow] Focused Codex session: \(codexSession.projectName)")
     }
 }
