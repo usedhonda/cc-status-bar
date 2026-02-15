@@ -18,7 +18,41 @@ final class AutofocusManager {
     private var debounceWorkItem: DispatchWorkItem?
     private let debounceInterval: TimeInterval = 0.5
 
-    private init() {}
+    /// Typing detection: suppress autofocus while user is typing
+    private var lastKeystrokeTime: Date?
+    private var keyMonitor: Any?
+    private let typingCooldown: TimeInterval = 2.0
+
+    private init() {
+        startKeyMonitor()
+    }
+
+    private func startKeyMonitor() {
+        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            Task { @MainActor in
+                self?.lastKeystrokeTime = Date()
+            }
+        }
+    }
+
+    private func isUserTyping() -> Bool {
+        // Recent keystroke check
+        if let last = lastKeystrokeTime,
+           Date().timeIntervalSince(last) < typingCooldown {
+            return true
+        }
+        // IME composition check (marked text in focused element)
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef
+        ) == .success else { return false }
+        var markedRangeRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            focusedRef as! AXUIElement, "AXMarkedTextRange" as CFString, &markedRangeRef
+        )
+        return result == .success && markedRangeRef != nil
+    }
 
     // MARK: - Public API
 
@@ -78,6 +112,11 @@ final class AutofocusManager {
     private func performAutofocus(candidates: [Session]) {
         guard AppSettings.autofocusEnabled else { return }
 
+        if isUserTyping() {
+            DebugLog.log("[AutofocusManager] User typing, skipping autofocus")
+            return
+        }
+
         // Filter out detached tmux sessions (no terminal to focus)
         let focusable = candidates.filter { session in
             guard let tty = session.tty,
@@ -124,6 +163,11 @@ final class AutofocusManager {
 
     private func performCodexAutofocus(codexSession: CodexSession, isRed: Bool) {
         guard AppSettings.autofocusEnabled else { return }
+
+        if isUserTyping() {
+            DebugLog.log("[AutofocusManager] User typing, skipping Codex autofocus")
+            return
+        }
 
         // Skip detached tmux sessions
         if let tty = codexSession.tty,
