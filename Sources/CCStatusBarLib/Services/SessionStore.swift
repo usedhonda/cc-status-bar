@@ -142,6 +142,15 @@ final class SessionStore {
             DebugLog.log("[SessionStore] Update session \(key): \(existing.status) -> \(status), reason: \(String(describing: waitingReason)), toolRunning: \(isToolRunning)")
             existing.status = status
             existing.waitingReason = waitingReason
+            if waitingReason == .askUserQuestion {
+                existing.questionText = event.question?.text
+                existing.questionOptions = event.question?.options.map(\.label)
+                existing.questionSelected = event.question?.selectedIndex
+            } else if status == .running || status == .stopped {
+                existing.questionText = nil
+                existing.questionOptions = nil
+                existing.questionSelected = nil
+            }
             existing.isToolRunning = isToolRunning
             existing.updatedAt = now
             // Update termProgram if provided (first value wins)
@@ -200,6 +209,9 @@ final class SessionStore {
                 editorBundleID: event.editorBundleID,
                 editorPID: event.editorPID,
                 waitingReason: waitingReason,
+                questionText: waitingReason == .askUserQuestion ? event.question?.text : nil,
+                questionOptions: waitingReason == .askUserQuestion ? event.question?.options.map(\.label) : nil,
+                questionSelected: waitingReason == .askUserQuestion ? event.question?.selectedIndex : nil,
                 isToolRunning: isToolRunning,
                 displayOrder: newDisplayOrder
             )
@@ -368,6 +380,10 @@ final class SessionStore {
         case .stop:
             return (.waitingInput, .stop, false)  // Yellow - command completion waiting
         case .notification:
+            // AskUserQuestion must be checked before permission_prompt fallback.
+            if event.isAskUserQuestion {
+                return (.waitingInput, .askUserQuestion, false)
+            }
             // Use isPermissionPrompt which checks both notification_type and message content
             if event.isPermissionPrompt {
                 return (.waitingInput, .permissionPrompt, false)  // Red - permission/choice waiting

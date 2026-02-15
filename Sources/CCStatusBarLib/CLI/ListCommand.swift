@@ -49,8 +49,7 @@ public struct ListCommand: ParsableCommand {
                 // Show waiting reason and duration if applicable
                 if session.status == .waitingInput {
                     if let reason = session.waitingReason {
-                        let reasonLabel = reason == .permissionPrompt ? "permission_prompt" : "stop"
-                        print("   Reason: \(reasonLabel)")
+                        print("   Reason: \(reason.rawValue)")
                     }
                     let waitingTime = formatWaitingTime(since: session.updatedAt)
                     print("   Waiting: \(waitingTime)")

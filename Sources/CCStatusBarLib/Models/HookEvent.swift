@@ -1,5 +1,22 @@
 import Foundation
 
+struct HookQuestionOption: Codable {
+    let label: String
+    let description: String?
+}
+
+struct HookQuestionPayload: Codable {
+    let text: String
+    let options: [HookQuestionOption]
+    let selectedIndex: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case options
+        case selectedIndex = "selected_index"
+    }
+}
+
 enum HookEventName: String, Codable {
     case preToolUse = "PreToolUse"
     case postToolUse = "PostToolUse"
@@ -17,6 +34,8 @@ struct HookEvent: Codable {
     let hookEventName: HookEventName
     let notificationType: String?
     let message: String?  // Notification message (used as fallback for permission detection)
+    let toolName: String?  // Tool name for Notification payload (e.g. AskUserQuestion)
+    let question: HookQuestionPayload?  // Structured AskUserQuestion payload
     var termProgram: String?  // Captured from TERM_PROGRAM environment variable (legacy)
     var actualTermProgram: String?  // Actual terminal when inside tmux (detected from client parent)
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain
@@ -35,6 +54,10 @@ struct HookEvent: Codable {
         return false
     }
 
+    var isAskUserQuestion: Bool {
+        toolName == "AskUserQuestion"
+    }
+
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd
@@ -42,6 +65,8 @@ struct HookEvent: Codable {
         case hookEventName = "hook_event_name"
         case notificationType = "notification_type"
         case message
+        case toolName = "tool_name"
+        case question
         case termProgram = "term_program"
         case actualTermProgram = "actual_term_program"
         case editorBundleID = "editor_bundle_id"

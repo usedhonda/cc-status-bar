@@ -10,6 +10,7 @@ struct ConnectionSetupView: View {
     @State private var copied = false
 
     private let networkHelper = NetworkHelper.shared
+    private static let appStoreURL = URL(string: "https://apps.apple.com/jp/app/vibeterm/id6758266443")!
 
     /// Check if Tailscale is available and connected
     private var hasTailscale: Bool {
@@ -29,10 +30,17 @@ struct ConnectionSetupView: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
-            // Title
-            Text("iOS Connection Setup")
-                .font(.headline)
+        VStack(spacing: 12) {
+            // Header - clickable to App Store
+            Link(destination: Self.appStoreURL) {
+                HStack(spacing: 6) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 16))
+                    Text("Connect VibeTerm")
+                        .font(.headline)
+                }
+            }
+            .padding(.top, 4)
 
             // Network selector (3 options)
             HStack(spacing: 0) {
@@ -46,14 +54,19 @@ struct ConnectionSetupView: View {
 
             // QR Code
             if let url = connectionURL, let qrImage = generateQRCode(from: url) {
-                Image(nsImage: qrImage)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 200, height: 200)
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(8)
+                Link(destination: Self.appStoreURL) {
+                    Image(nsImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 200)
+                        .padding()
+                        .background(Color.white)
+                        .cornerRadius(8)
+                }
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
             } else {
                 // No QR code available
                 VStack(spacing: 8) {
@@ -100,15 +113,20 @@ struct ConnectionSetupView: View {
             .buttonStyle(.borderedProminent)
             .disabled(connectionURL == nil)
 
-            // Help text
-            Text("Scan with vibeterm")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Footer - clickable to App Store
+            Link(destination: Self.appStoreURL) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.app")
+                        .font(.caption2)
+                    Text("Get VibeTerm on App Store")
+                        .font(.caption)
+                }
+            }
 
             Spacer()
         }
         .padding()
-        .frame(width: 360, height: 500)
+        .frame(width: 320, height: 460)
         .onAppear {
             loadNetworkInfo()
         }
@@ -242,9 +260,9 @@ final class ConnectionSetupWindowController {
             let hostingController = NSHostingController(rootView: view)
 
             let newWindow = NSWindow(contentViewController: hostingController)
-            newWindow.title = "iOS Connection Setup"
+            newWindow.title = "VibeTerm"
             newWindow.styleMask = [.titled, .closable]
-            newWindow.setContentSize(NSSize(width: 360, height: 500))
+            newWindow.setContentSize(NSSize(width: 320, height: 460))
             newWindow.center()
 
             // Keep reference to prevent deallocation

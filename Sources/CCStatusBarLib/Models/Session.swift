@@ -2,6 +2,7 @@ import Foundation
 
 enum WaitingReason: String, Codable {
     case permissionPrompt = "permission_prompt"  // Red - permission/choice waiting
+    case askUserQuestion = "askUserQuestion"     // Yellow - AskUserQuestion tool waiting
     case stop = "stop"                           // Yellow - command completion waiting
     case unknown = "unknown"                     // Yellow - legacy/unknown reason
 }
@@ -19,6 +20,9 @@ struct Session: Codable, Identifiable, Equatable {
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain (e.g., "com.todesktop.230313mzl4w4u92" for Cursor)
     var editorPID: pid_t?  // Editor process ID for direct activation (reliable for multiple instances)
     var waitingReason: WaitingReason?  // Reason for waitingInput status (permissionPrompt=red, stop/unknown=yellow)
+    var questionText: String? = nil  // AskUserQuestion text
+    var questionOptions: [String]? = nil  // AskUserQuestion option labels
+    var questionSelected: Int? = nil  // AskUserQuestion selected index
     var isToolRunning: Bool?  // true during PreToolUse..PostToolUse (show spinner)
     var isAcknowledged: Bool?  // true if user has seen this waiting session (show as green)
     var displayOrder: Int?  // Display order in menu (stable across restarts, inherited on TTY reuse)
@@ -101,6 +105,9 @@ struct Session: Codable, Identifiable, Equatable {
         case editorBundleID = "editor_bundle_id"
         case editorPID = "editor_pid"
         case waitingReason = "waiting_reason"
+        case questionText = "question_text"
+        case questionOptions = "question_options"
+        case questionSelected = "question_selected"
         case isToolRunning = "is_tool_running"
         case isAcknowledged = "is_acknowledged"
         case displayOrder = "display_order"

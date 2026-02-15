@@ -161,12 +161,27 @@ final class WebSocketManager {
 
     private func handleSessionsChanged(_ sessions: [Session]) {
         let currentSessionsById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let ttyMigrations = Self.detectTTYMigrations(previous: previousSessions, current: sessions)
+        let migratedPreviousIDs = Set(ttyMigrations.values)
 
         // --- Claude Code sessions ---
 
         // Detect added sessions
         for session in sessions {
             if previousSessions[session.id] == nil {
+                // Session ID changed on same TTY: treat as update continuity.
+                if let previousID = ttyMigrations[session.id],
+                   let previous = previousSessions[previousID] {
+                    if session != previous {
+                        let event = WebSocketEvent(
+                            type: .sessionUpdated,
+                            session: buildUpdatedSessionDict(current: session, previous: previous)
+                        )
+                        broadcast(event: event)
+                    }
+                    continue
+                }
+
                 // Check if this is a new terminal type
                 let terminalName = session.environmentLabel
                 let isNewTerminalType = !knownTerminalTypes.contains(terminalName)
@@ -178,14 +193,18 @@ final class WebSocketManager {
                     icon = IconManager.shared.iconBase64(for: env, size: 64)
                 }
 
-                let event = WebSocketEvent(type: .sessionAdded, session: claudeSessionToDict(session), icon: icon)
+                let event = WebSocketEvent(
+                    type: .sessionAdded,
+                    session: buildAddedSessionDict(session),
+                    icon: icon
+                )
                 broadcast(event: event)
             }
         }
 
         // Detect removed sessions
         for (id, _) in previousSessions {
-            if currentSessionsById[id] == nil {
+            if currentSessionsById[id] == nil && !migratedPreviousIDs.contains(id) {
                 let event = WebSocketEvent(type: .sessionRemoved, sessionId: id)
                 broadcast(event: event)
             }
@@ -194,17 +213,10 @@ final class WebSocketManager {
         // Detect updated sessions
         for session in sessions {
             if let previous = previousSessions[session.id], session != previous {
-                var dict = claudeSessionToDict(session)
-                // Attach pane capture on waiting_input transition
-                if previous.status == .running && session.status == .waitingInput {
-                    if let tty = session.tty, let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
-                        let target = paneInfo.targetSpecifier
-                        if let capture = TmuxHelper.capturePane(target: target, socketPath: paneInfo.socketPath) {
-                            dict["pane_capture"] = capture
-                        }
-                    }
-                }
-                let event = WebSocketEvent(type: .sessionUpdated, session: dict)
+                let event = WebSocketEvent(
+                    type: .sessionUpdated,
+                    session: buildUpdatedSessionDict(current: session, previous: previous)
+                )
                 broadcast(event: event)
             }
         }
@@ -247,6 +259,58 @@ final class WebSocketManager {
         previousCodexIDs = currentCodexIDs
     }
 
+    private func buildUpdatedSessionDict(current: Session, previous: Session) -> [String: Any] {
+        var dict = claudeSessionToDict(current)
+        // Attach pane capture on waiting_input transition
+        if previous.status == .running && current.status == .waitingInput {
+            if let tty = current.tty, let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
+                let target = paneInfo.targetSpecifier
+                if let capture = TmuxHelper.capturePane(target: target, socketPath: paneInfo.socketPath) {
+                    dict["pane_capture"] = capture
+                }
+            }
+        }
+        return dict
+    }
+
+    private func buildAddedSessionDict(_ session: Session) -> [String: Any] {
+        var dict = claudeSessionToDict(session)
+        // Also include pane capture on initial waiting_input add.
+        if session.status == .waitingInput,
+           let tty = session.tty,
+           let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
+            let target = paneInfo.targetSpecifier
+            if let capture = TmuxHelper.capturePane(target: target, socketPath: paneInfo.socketPath) {
+                dict["pane_capture"] = capture
+            }
+        }
+        return dict
+    }
+
+    /// Detect session ID migration on the same TTY.
+    /// Returns mapping: new session id -> previous session id.
+    nonisolated static func detectTTYMigrations(previous: [String: Session], current: [Session]) -> [String: String] {
+        let currentIDs = Set(current.map(\.id))
+        var previousByTTY: [String: String] = [:]
+        var migrations: [String: String] = [:]
+
+        for (id, session) in previous {
+            guard let tty = session.tty, !tty.isEmpty else { continue }
+            previousByTTY[tty] = id
+        }
+
+        for session in current {
+            guard let tty = session.tty, !tty.isEmpty else { continue }
+            guard let oldID = previousByTTY[tty] else { continue }
+            guard oldID != session.id else { continue }
+            // Migration means old id disappeared from current snapshot.
+            guard !currentIDs.contains(oldID) else { continue }
+            migrations[session.id] = oldID
+        }
+
+        return migrations
+    }
+
     /// Convert Claude Code session to dictionary for WebSocket output
     private func claudeSessionToDict(_ session: Session) -> [String: Any] {
         var dict: [String: Any] = [
@@ -268,6 +332,17 @@ final class WebSocketManager {
 
         if session.status == .waitingInput {
             dict["waiting_reason"] = session.waitingReason?.rawValue ?? "unknown"
+            if session.waitingReason == .askUserQuestion {
+                if let text = session.questionText {
+                    dict["question_text"] = text
+                }
+                if let options = session.questionOptions {
+                    dict["question_options"] = options
+                }
+                if let selected = session.questionSelected {
+                    dict["question_selected"] = selected
+                }
+            }
         }
 
         if let isToolRunning = session.isToolRunning {
