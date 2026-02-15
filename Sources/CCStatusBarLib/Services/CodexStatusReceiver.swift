@@ -22,8 +22,6 @@ final class CodexStatusReceiver {
 
     // MARK: - Configuration
 
-    /// Timeout after which waiting_input reverts to running (seconds)
-    private let waitingTimeout: TimeInterval = 30.0
     /// Grace period before considering a missing Codex session as stopped (seconds)
     private let pidDisappearGrace: TimeInterval = 3.0
     /// Keep synthetic stopped sessions for this long before pruning (seconds)
@@ -224,24 +222,11 @@ final class CodexStatusReceiver {
 
     private func applyTimeTransitions(now: Date) {
         for (cwd, tracked) in statusByCwd {
-            var next = tracked
-
-            if tracked.status == .waitingInput,
-               now.timeIntervalSince(tracked.lastEventAt) > waitingTimeout {
-                next.status = .running
-                next.waitingReason = nil
-                // Clear autofocus cooldown on timeout transition
-                AutofocusManager.shared.clearCooldown(sessionId: "codex:synthetic:\(cwd)")
-            }
-
             if tracked.status == .stopped,
                let stoppedAt = tracked.stoppedAt,
                now.timeIntervalSince(stoppedAt) > stoppedRetention {
                 statusByCwd.removeValue(forKey: cwd)
-                continue
             }
-
-            statusByCwd[cwd] = next
         }
     }
 
