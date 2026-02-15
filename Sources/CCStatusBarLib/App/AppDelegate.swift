@@ -6,7 +6,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
     private var isMenuOpen = false
-    private var codexPollingTimer: Timer?
 
     /// Debounce work item for menu rebuilds
     private var menuRebuildWorkItem: DispatchWorkItem?
@@ -120,16 +119,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Poll Codex status reconciliation so synthetic stopped can be reflected without hooks.
-        codexPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            Task { @MainActor [weak self] in
+        Timer.publish(every: 2.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
                 self?.refreshCodexStatusState()
             }
-        }
+            .store(in: &cancellables)
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        codexPollingTimer?.invalidate()
-        codexPollingTimer = nil
         WebServer.shared.stop()
         DebugLog.log("[AppDelegate] Application will terminate")
     }
