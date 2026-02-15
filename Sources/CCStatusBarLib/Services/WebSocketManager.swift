@@ -82,6 +82,7 @@ final class WebSocketManager {
 
     private var previousSessions: [String: Session] = [:]
     private var previousCodexIDs = Set<String>()  // Track Codex sessions by unique id
+    private var previousCodexStateHashes: [String: Int] = [:]
     private var knownTerminalTypes = Set<String>()
     private var cancellables = Set<AnyCancellable>()
 
@@ -109,7 +110,9 @@ final class WebSocketManager {
         // Send initial session list with icons (both Claude Code and Codex)
         let claudeSessions = SessionStore.shared.getSessions()
         let codexSessions = CodexObserver.getActiveSessions()
-        let codexSessionList = Array(codexSessions.values).sorted { $0.pid < $1.pid }
+        let codexSessionList = CodexStatusReceiver.shared.withSyntheticStoppedSessions(
+            activeSessions: Array(codexSessions.values).sorted { $0.pid < $1.pid }
+        )
 
         var sessionsData = claudeSessions.map { claudeSessionToDict($0) }
         sessionsData += codexSessionList.map { codexSessionToDict($0) }
@@ -224,11 +227,15 @@ final class WebSocketManager {
         previousSessions = currentSessionsById
 
         // --- Codex sessions ---
-        let currentCodexSessions = CodexObserver.getActiveSessions()
-        let currentCodexIDs = Set(currentCodexSessions.keys)
+        let currentCodexSessions = CodexStatusReceiver.shared.withSyntheticStoppedSessions(
+            activeSessions: Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+        )
+        let currentCodexById = Dictionary(uniqueKeysWithValues: currentCodexSessions.map { ($0.id, $0) })
+        let currentCodexIDs = Set(currentCodexById.keys)
 
         // Detect added Codex sessions
-        for (id, codexSession) in currentCodexSessions {
+        for codexSession in currentCodexSessions {
+            let id = codexSession.id
             if !previousCodexIDs.contains(id) {
                 // Check if this is a new terminal type
                 let terminalName = codexSession.terminalApp ?? "Codex"
@@ -253,7 +260,27 @@ final class WebSocketManager {
             if !currentCodexIDs.contains(id) {
                 let event = WebSocketEvent(type: .sessionRemoved, sessionId: id)
                 broadcast(event: event)
+                previousCodexStateHashes.removeValue(forKey: id)
             }
+        }
+
+        // Detect updated Codex sessions (status transitions like synthetic stopped)
+        for id in currentCodexIDs.intersection(previousCodexIDs) {
+            guard let codexSession = currentCodexById[id] else { continue }
+            let dict = codexSessionToDict(codexSession)
+            let stateHash = codexStateFingerprint(codexSession, payload: dict)
+            if previousCodexStateHashes[id] != stateHash {
+                let event = WebSocketEvent(type: .sessionUpdated, session: dict)
+                broadcast(event: event)
+            }
+            previousCodexStateHashes[id] = stateHash
+        }
+
+        // Initialize hash for newly added Codex sessions
+        for id in currentCodexIDs.subtracting(previousCodexIDs) {
+            guard let codexSession = currentCodexById[id] else { continue }
+            let payload = codexSessionToDict(codexSession)
+            previousCodexStateHashes[id] = codexStateFingerprint(codexSession, payload: payload)
         }
 
         previousCodexIDs = currentCodexIDs
@@ -372,6 +399,8 @@ final class WebSocketManager {
         let attentionLevel: Int
         if status == .waitingInput {
             attentionLevel = (waitingReason == .permissionPrompt) ? 2 : 1  // red or yellow
+        } else if status == .stopped {
+            attentionLevel = 0
         } else {
             attentionLevel = 0
         }
@@ -381,7 +410,7 @@ final class WebSocketManager {
 
         var dict: [String: Any] = [
             "type": "codex",
-            "id": "codex:\(session.pid)",
+            "id": session.id,
             "pid": session.pid,
             "project": session.projectName,
             "cwd": session.cwd,
@@ -397,6 +426,8 @@ final class WebSocketManager {
 
         if status == .waitingInput {
             dict["waiting_reason"] = (waitingReason ?? .unknown).rawValue
+        } else if status == .stopped {
+            dict["synthetic_stopped"] = true
         }
 
         // Add TTY if available
@@ -469,6 +500,15 @@ final class WebSocketManager {
         return 0  // stopped/unknown
     }
 
+    private func codexStateFingerprint(_ session: CodexSession, payload: [String: Any]) -> Int {
+        let status = payload["status"] as? String ?? ""
+        let waitingReason = payload["waiting_reason"] as? String ?? ""
+        let syntheticStopped = (payload["synthetic_stopped"] as? Bool ?? false) ? "1" : "0"
+        let terminal = payload["terminal"] as? String ?? ""
+        let seed = "\(session.id)|\(status)|\(waitingReason)|\(syntheticStopped)|\(terminal)|\(session.cwd)"
+        return seed.hashValue
+    }
+
     // MARK: - Progress Broadcasting
 
     /// Start periodic progress broadcasting for running sessions
@@ -511,7 +551,7 @@ final class WebSocketManager {
             let target = "\(tmuxSession):\(tmuxWindow).\(tmuxPane)"
             guard let capture = TmuxHelper.capturePane(target: target, socketPath: session.tmuxSocketPath) else { continue }
             let hash = capture.hashValue
-            let key = "codex:\(session.pid)"
+            let key = session.id
             if lastProgressHashes[key] == hash { continue }
             lastProgressHashes[key] = hash
 

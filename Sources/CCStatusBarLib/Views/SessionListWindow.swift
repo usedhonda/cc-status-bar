@@ -211,7 +211,8 @@ final class SessionListWindowController {
     }
 
     private func currentCodexSessionCount() -> Int {
-        Array(CodexObserver.getActiveSessions().values).count
+        let active = Array(CodexObserver.getActiveSessions().values)
+        return CodexStatusReceiver.shared.withSyntheticStoppedSessions(activeSessions: active).count
     }
 }
 
@@ -233,9 +234,9 @@ struct SessionListWindowView: View {
 
     private var filteredCodexSessions: [CodexSession] {
         _ = codexRefreshTick
-        return showCodex
-            ? Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
-            : []
+        guard showCodex else { return [] }
+        let active = Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+        return CodexStatusReceiver.shared.withSyntheticStoppedSessions(activeSessions: active)
     }
 
     private var totalSessionCount: Int {
@@ -692,10 +693,16 @@ struct PinnedCodexSessionRowView: View {
         if status == .waitingInput {
             return waitingReason == .permissionPrompt ? "Permission" : "Waiting"
         }
+        if status == .stopped {
+            return "Stopped"
+        }
         return "Running"
     }
 
     private var statusColor: Color {
+        if status == .stopped {
+            return Color(white: 0.5)
+        }
         if status == .waitingInput {
             if waitingReason == .permissionPrompt {
                 return Color(red: 1.0, green: 0.3, blue: 0.3)
@@ -706,6 +713,10 @@ struct PinnedCodexSessionRowView: View {
     }
 
     private func focusCodexSession() {
+        guard status != .stopped, codexSession.pid > 0 else {
+            DebugLog.log("[SessionListWindow] Skip focus for synthetic stopped Codex session: \(codexSession.cwd)")
+            return
+        }
         CodexFocusHelper.focus(session: codexSession)
         DebugLog.log("[SessionListWindow] Focused Codex session: \(codexSession.projectName)")
     }
