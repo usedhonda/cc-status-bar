@@ -6,6 +6,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
     private var isMenuOpen = false
+    private var codexPollingTimer: Timer?
 
     /// Debounce work item for menu rebuilds
     private var menuRebuildWorkItem: DispatchWorkItem?
@@ -117,9 +118,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             _ = CodexObserver.getActiveSessions()
             DebugLog.log("[AppDelegate] Cache pre-warm complete")
         }
+
+        // Poll Codex status reconciliation so synthetic stopped can be reflected without hooks.
+        codexPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshCodexStatusState()
+            }
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        codexPollingTimer?.invalidate()
+        codexPollingTimer = nil
         WebServer.shared.stop()
         DebugLog.log("[AppDelegate] Application will terminate")
     }
@@ -884,7 +894,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Get Codex sessions for menu display
     @MainActor
     private func getCodexSessionsForMenu() -> [CodexSession] {
-        return Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+        let active = Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+        return CodexStatusReceiver.shared.withSyntheticStoppedSessions(activeSessions: active)
     }
 
     /// Get Codex session counts for status title
@@ -906,7 +917,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 } else {
                     yellow += 1
                 }
-            } else {
+            } else if status == .running {
                 green += 1
             }
         }
@@ -933,12 +944,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ? CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
             : nil
         let symbolColor: NSColor
-        if status == .waitingInput {
+        if status == .stopped {
+            symbolColor = NSColor.systemGray
+        } else if status == .waitingInput {
             symbolColor = (waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
         } else {
             symbolColor = theme.greenColor
         }
-        let symbol = (status == .waitingInput) ? "◐" : "●"
+        let symbol: String
+        switch status {
+        case .running: symbol = "●"
+        case .waitingInput: symbol = "◐"
+        case .stopped: symbol = "✓"
+        }
 
         // Icon: Use terminal icon based on detected terminal app
         let env = CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
@@ -984,6 +1002,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let statusLabel: String
         if status == .waitingInput {
             statusLabel = (waitingReason == .permissionPrompt) ? "Permission" : "Waiting"
+        } else if status == .stopped {
+            statusLabel = "Stopped"
         } else {
             statusLabel = "Running"
         }
@@ -1043,8 +1063,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    @objc private func codexItemClicked(_ sender: NSMenuItem) {
+    @MainActor @objc private func codexItemClicked(_ sender: NSMenuItem) {
         guard let codexSession = sender.representedObject as? CodexSession else { return }
+        let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
+        guard status != .stopped, codexSession.pid > 0 else {
+            DebugLog.log("[AppDelegate] Skip focus for synthetic stopped Codex session: \(codexSession.cwd)")
+            return
+        }
         CodexFocusHelper.focus(session: codexSession)
         DebugLog.log("[AppDelegate] Focused Codex session: \(codexSession.projectName)")
     }
@@ -1332,7 +1357,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Codex Background Refresh
 
     @MainActor @objc private func codexSessionsDidUpdate() {
+        refreshCodexStatusState()
         scheduleMenuRebuild()
+    }
+
+    @MainActor
+    private func refreshCodexStatusState() {
+        let active = Array(CodexObserver.getActiveSessions().values)
+        CodexStatusReceiver.shared.reconcileActiveSessions(active)
+        updateStatusTitle()
     }
 
     // MARK: - Duplicate Instance Prevention
