@@ -119,11 +119,23 @@ When user focuses a terminal with a waiting session, mark it as "acknowledged" s
 - Ghostty: Tab activation (via Accessibility API)
 - iTerm2: Tab activation (via AppleScript TTY detection)
 
-### 3.4 Implementation
+### 3.4 Codex Session Acknowledge
+
+Codex sessions follow the same acknowledge pattern:
+
+1. When user clicks/focuses a Codex session, it becomes acknowledged
+2. Acknowledged Codex sessions display as green (running) instead of yellow/red
+3. New `waitingInput` event clears the acknowledge flag
+4. Pane content change detection also clears the acknowledge flag (running recovery)
+
+### 3.5 Implementation
 
 - **File**: `Sources/Services/SessionObserver.swift`
 - **Properties**: `acknowledgedSessionIds`, `unacknowledgedRedCount`, `unacknowledgedYellowCount`, `displayedGreenCount`
 - **Methods**: `acknowledge(sessionId:)`, `isAcknowledged(sessionId:)`
+- **File**: `Sources/Services/CodexStatusReceiver.swift`
+- **Properties**: `acknowledgedCwds`
+- **Methods**: `acknowledge(cwd:)`, `isAcknowledged(cwd:)`
 
 ---
 
@@ -623,6 +635,8 @@ OFF (opt-in). Enabled via Settings > Autofocus toggle.
 - Session is already acknowledged
 - Session is on cooldown
 - tmux session is detached (no terminal to focus)
+- User is typing (keystroke within last 2 seconds)
+- IME composition in progress (marked text detected via Accessibility API)
 
 ### 14.5.7 Relationship with Other Features
 
