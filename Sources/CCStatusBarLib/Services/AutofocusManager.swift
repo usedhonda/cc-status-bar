@@ -45,6 +45,24 @@ final class AutofocusManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
 
+    /// Called when a Codex session transitions to waitingInput.
+    /// Uses the same debounce window as CC sessions.
+    func handleCodexWaitingTransition(_ codexSession: CodexSession, reason: CodexWaitingReason) {
+        guard AppSettings.autofocusEnabled else { return }
+        let key = codexSession.id
+        guard !isOnCooldown(sessionId: key) else { return }
+
+        // Cancel previous debounce (shared with CC sessions)
+        debounceWorkItem?.cancel()
+
+        let isRed = reason == .permissionPrompt
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performCodexAutofocus(codexSession: codexSession, isRed: isRed)
+        }
+        debounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
+    }
+
     /// Clear cooldown when a session returns to running
     func clearCooldown(sessionId: String) {
         cooldowns.removeValue(forKey: sessionId)
@@ -101,6 +119,34 @@ final class AutofocusManager {
             DebugLog.log("[AutofocusManager] Autofocus failed (\(hint)): \(target.projectName)")
         case .notRunning:
             DebugLog.log("[AutofocusManager] Autofocus failed (terminal not running): \(target.projectName)")
+        }
+    }
+
+    private func performCodexAutofocus(codexSession: CodexSession, isRed: Bool) {
+        guard AppSettings.autofocusEnabled else { return }
+
+        // Skip detached tmux sessions
+        if let tty = codexSession.tty,
+           let paneInfo = TmuxHelper.getPaneInfo(for: tty),
+           !TmuxHelper.isSessionAttached(paneInfo.session, socketPath: paneInfo.socketPath) {
+            DebugLog.log("[AutofocusManager] Codex candidate is detached tmux, skipping")
+            return
+        }
+
+        let reasonStr = isRed ? "permission_prompt" : "stop"
+        DebugLog.log("[AutofocusManager] Autofocusing Codex session: \(codexSession.projectName) (reason: \(reasonStr))")
+
+        let result = CodexFocusHelper.focus(session: codexSession)
+        let key = codexSession.id
+
+        switch result {
+        case .success, .partialSuccess:
+            cooldowns[key] = Date()
+            DebugLog.log("[AutofocusManager] Codex autofocus success: \(codexSession.projectName)")
+        case .notFound(let hint):
+            DebugLog.log("[AutofocusManager] Codex autofocus failed (\(hint)): \(codexSession.projectName)")
+        case .notRunning:
+            DebugLog.log("[AutofocusManager] Codex autofocus failed (terminal not running): \(codexSession.projectName)")
         }
     }
 }
