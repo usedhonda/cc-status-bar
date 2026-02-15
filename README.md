@@ -46,6 +46,15 @@ Applies to both Claude Code and Codex sessions. When not running in tmux, all mo
 ### Notification Actions
 When a session needs attention, notifications include a **Focus Terminal** button for instant access.
 
+### Autofocus
+Enable in **Settings → Autofocus** to automatically focus your terminal when a session transitions to waiting. No more manual window switching.
+
+- Focuses the highest priority session (red > yellow, most recent first)
+- 500ms debounce prevents rapid focus switching
+- 30s per-session cooldown avoids repeated focus on the same session
+- Skips detached tmux sessions (no terminal to focus)
+- Auto-acknowledges the focused session
+
 ### Auto Setup
 On first launch, the app automatically:
 - Creates symlink for Claude Code hooks
