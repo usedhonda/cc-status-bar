@@ -588,6 +588,61 @@ Prevent notification spam for the same session in the same state.
 
 ---
 
+## 14.5 Autofocus
+
+### 14.5.1 Purpose
+
+Automatically focus the terminal/editor when a session transitions to `waitingInput`. Eliminates manual terminal switching for tmux users with multiple concurrent sessions.
+
+### 14.5.2 Default
+
+OFF (opt-in). Enabled via Settings > Autofocus toggle.
+
+### 14.5.3 Behavior
+
+1. Triggered when a session transitions from non-waiting to `waitingInput`
+2. Picks the highest-priority candidate:
+   - Priority: red (`permissionPrompt`) > yellow (`stop`/`unknown`)
+   - Same priority: most recently updated (`updatedAt` descending)
+3. Focuses the terminal via `FocusManager.shared.focus(session:)`
+4. On success: auto-acknowledges the session
+
+### 14.5.4 Debounce
+
+- 500ms debounce window per batch of transitions
+- Only 1 session is focused per debounce window (highest priority)
+
+### 14.5.5 Cooldown
+
+- 30 seconds per session (independent from notification's 5-minute cooldown)
+- Cleared when session returns to `running`
+
+### 14.5.6 Skip Conditions
+
+- Feature is OFF (`AppSettings.autofocusEnabled == false`)
+- Session is already acknowledged
+- Session is on cooldown
+- tmux session is detached (no terminal to focus)
+
+### 14.5.7 Relationship with Other Features
+
+| Feature | Relationship |
+|---------|-------------|
+| Notifications | Both fire independently. Autofocus = action, Notification = record |
+| Hotkey | Same priority logic (red > yellow, updatedAt desc) |
+| Auto-acknowledge | Autofocus triggers acknowledge on success |
+
+### 14.5.8 Implementation
+
+- **File**: `Sources/Services/AutofocusManager.swift`
+- **Methods**: `handleWaitingTransitions(_:)`, `clearCooldown(sessionId:)`, `performAutofocus(candidates:)`
+- **File**: `Sources/Services/SessionObserver.swift`
+- **Method**: `sendNotificationsForWaitingSessions(_:)` (calls AutofocusManager), `cleanupAcknowledgedSessions(_:)` (clears cooldown)
+- **File**: `Sources/Services/AppSettings.swift`
+- **Property**: `autofocusEnabled`
+
+---
+
 ## 15. Stale Session Cleanup
 
 ### 15.1 Purpose

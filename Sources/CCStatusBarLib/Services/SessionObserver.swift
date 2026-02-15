@@ -202,12 +202,19 @@ final class SessionObserver: ObservableObject {
     // MARK: - Notifications
 
     private func sendNotificationsForWaitingSessions(_ loadedSessions: [Session]) {
+        var newlyWaiting: [Session] = []
         for session in loadedSessions {
             // Check if status changed to waitingInput
             let oldStatus = previousSessionStatuses[session.id]
             if session.status == .waitingInput && oldStatus != .waitingInput {
                 NotificationManager.shared.notifyWaitingInput(session: session)
+                newlyWaiting.append(session)
             }
+        }
+
+        // Trigger autofocus for newly waiting sessions
+        if !newlyWaiting.isEmpty {
+            AutofocusManager.shared.handleWaitingTransitions(newlyWaiting)
         }
     }
 
@@ -219,10 +226,11 @@ final class SessionObserver: ObservableObject {
             SessionStore.shared.clearAcknowledged(sessionId: session.sessionId, tty: session.tty)
         }
 
-        // Clear notification cooldowns for sessions that returned to running
+        // Clear notification and autofocus cooldowns for sessions that returned to running
         let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
         for sessionId in runningIds {
             NotificationManager.shared.clearCooldown(sessionId: sessionId)
+            AutofocusManager.shared.clearCooldown(sessionId: sessionId)
         }
     }
 

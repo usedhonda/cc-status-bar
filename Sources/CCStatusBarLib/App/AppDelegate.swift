@@ -71,6 +71,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // Initialize autofocus manager
+        AutofocusManager.shared.sessionObserver = sessionObserver
+
         // Start WebSocket session observation (for iOS app real-time updates)
         WebSocketManager.shared.observeSessions(sessionObserver.$sessions)
 
@@ -433,6 +436,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifyItem.state = AppSettings.notificationsEnabled ? .on : .off
         menu.addItem(notifyItem)
 
+        // Autofocus
+        let autofocusItem = NSMenuItem(
+            title: "Autofocus",
+            action: #selector(toggleAutofocus(_:)),
+            keyEquivalent: ""
+        )
+        autofocusItem.target = self
+        autofocusItem.state = AppSettings.autofocusEnabled ? .on : .off
+        menu.addItem(autofocusItem)
+
         // Session Timeout submenu
         let timeoutItem = NSMenuItem(title: "Session Timeout", action: nil, keyEquivalent: "")
         timeoutItem.submenu = createTimeoutMenu()
@@ -712,6 +725,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if newState {
             NotificationManager.shared.requestPermission()
         }
+    }
+
+    @objc private func toggleAutofocus(_ sender: NSMenuItem) {
+        let newState = !AppSettings.autofocusEnabled
+        AppSettings.autofocusEnabled = newState
+        sender.state = newState ? .on : .off
+        DebugLog.log("[AppDelegate] Autofocus \(newState ? "enabled" : "disabled")")
     }
 
     @MainActor @objc private func toggleShowClaudeCode(_ sender: NSMenuItem) {

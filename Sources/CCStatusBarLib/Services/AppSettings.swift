@@ -28,6 +28,7 @@ enum AppSettings {
         static let showClaudeCodeSessions = "showClaudeCodeSessions"
         static let showCodexSessions = "showCodexSessions"
         static let sessionDisplayMode = "sessionDisplayMode"
+        static let autofocusEnabled = "autofocusEnabled"
     }
 
     /// Bundle ID for shared UserDefaults access (CLI and GUI)
@@ -121,6 +122,17 @@ enum AppSettings {
             return defaults.bool(forKey: Keys.showCodexSessions)
         }
         set { defaults.set(newValue, forKey: Keys.showCodexSessions) }
+    }
+
+    static var autofocusEnabled: Bool {
+        get {
+            // Default to false if not set (opt-in)
+            if defaults.object(forKey: Keys.autofocusEnabled) == nil {
+                return false
+            }
+            return defaults.bool(forKey: Keys.autofocusEnabled)
+        }
+        set { defaults.set(newValue, forKey: Keys.autofocusEnabled) }
     }
 
     static var sessionDisplayMode: SessionDisplayMode {
