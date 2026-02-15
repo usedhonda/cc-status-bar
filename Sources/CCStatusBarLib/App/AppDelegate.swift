@@ -120,8 +120,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Poll Codex status reconciliation so synthetic stopped can be reflected without hooks.
-        codexPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+        codexPollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            Task { @MainActor [weak self] in
                 self?.refreshCodexStatusState()
             }
         }
