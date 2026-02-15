@@ -665,8 +665,14 @@ enum TmuxHelper {
         process.standardError = errorPipe
 
         do {
+            // Use DispatchSemaphore instead of waitUntilExit(). waitUntilExit
+            // spins CFRunLoop which can process display-cycle events → SwiftUI
+            // layout → body evaluation → more runCommand calls, crashing via
+            // NULL observer callback in UpdateCycle.
+            let semaphore = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in semaphore.signal() }
             try process.run()
-            process.waitUntilExit()
+            semaphore.wait()
 
             let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
