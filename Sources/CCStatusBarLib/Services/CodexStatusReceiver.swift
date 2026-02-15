@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Status of a Codex session
 enum CodexStatus: String, Codable {
@@ -17,7 +18,7 @@ enum CodexWaitingReason: String, Codable {
 /// Tracks status received from Codex notify events
 /// Provides cwd -> status mapping with timeout-based state machine
 @MainActor
-final class CodexStatusReceiver {
+final class CodexStatusReceiver: ObservableObject {
     static let shared = CodexStatusReceiver()
 
     // MARK: - Configuration
@@ -31,6 +32,10 @@ final class CodexStatusReceiver {
 
     /// cwd -> last event info
     private var statusByCwd: [String: CodexSessionStatus] = [:]
+    /// cwds that have been acknowledged by user (click/focus)
+    private var acknowledgedCwds: Set<String> = []
+    /// cwd -> hash of pane content at last agent-turn-complete (for detecting running recovery)
+    private var lastPaneCapture: [String: Int] = [:]
 
     private init() {}
 
@@ -81,6 +86,16 @@ final class CodexStatusReceiver {
             stoppedAt: nil,
             isSyntheticStopped: false
         )
+
+        // Clear acknowledge on new waiting event so it shows as yellow/red again
+        acknowledgedCwds.remove(cwd)
+
+        objectWillChange.send()
+
+        // Save pane capture hash for later comparison (running recovery detection)
+        if let paneCapture = paneCapture {
+            lastPaneCapture[cwd] = Self.hashPaneTail(paneCapture)
+        }
 
         DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd) reason=\(waitingReason.rawValue)")
 
@@ -133,14 +148,33 @@ final class CodexStatusReceiver {
         return sessionStatus.waitingReason ?? .unknown
     }
 
+    // MARK: - Acknowledge
+
+    /// Mark a Codex session as acknowledged (user clicked/focused it)
+    func acknowledge(cwd: String) {
+        acknowledgedCwds.insert(cwd)
+        objectWillChange.send()
+    }
+
+    /// Check if a Codex session has been acknowledged
+    func isAcknowledged(cwd: String) -> Bool {
+        acknowledgedCwds.contains(cwd)
+    }
+
     /// Remove status tracking for a cwd (when session ends)
     func removeStatus(for cwd: String) {
         statusByCwd.removeValue(forKey: cwd)
+        acknowledgedCwds.remove(cwd)
+        lastPaneCapture.removeValue(forKey: cwd)
+        objectWillChange.send()
     }
 
     /// Clear all status tracking
     func clearAll() {
         statusByCwd.removeAll()
+        acknowledgedCwds.removeAll()
+        lastPaneCapture.removeAll()
+        objectWillChange.send()
     }
 
     /// Reconcile internal status tracking with currently active Codex sessions.
@@ -159,6 +193,24 @@ final class CodexStatusReceiver {
                     // Clear autofocus cooldown when Codex session returns to running
                     let codexId = "codex:\(activeSessions.first { $0.cwd == cwd }?.pid ?? 0)"
                     AutofocusManager.shared.clearCooldown(sessionId: codexId)
+                } else if tracked.status == .waitingInput {
+                    // Detect running recovery by comparing pane content
+                    if let session = activeSessions.first(where: { $0.cwd == cwd }),
+                       let currentCapture = capturePane(for: session),
+                       let savedHash = lastPaneCapture[cwd] {
+                        let currentHash = Self.hashPaneTail(currentCapture)
+                        if currentHash != savedHash {
+                            tracked.status = .running
+                            tracked.waitingReason = nil
+                            tracked.lastEventAt = now
+                            lastPaneCapture.removeValue(forKey: cwd)
+                            acknowledgedCwds.remove(cwd)
+                            DebugLog.log("[CodexStatusReceiver] Pane changed, recovering to running: \(cwd)")
+
+                            // Invalidate CodexObserver cache to trigger WebSocket update
+                            CodexObserver.invalidateCache()
+                        }
+                    }
                 }
                 statusByCwd[cwd] = tracked
             } else {
@@ -189,6 +241,7 @@ final class CodexStatusReceiver {
         }
 
         applyTimeTransitions(now: now)
+        objectWillChange.send()
     }
 
     /// Return active sessions augmented with synthetic stopped placeholders.
@@ -247,6 +300,15 @@ final class CodexStatusReceiver {
         }
 
         return .stop
+    }
+
+    /// Hash the last N lines of pane output for comparison
+    static func hashPaneTail(_ content: String, tailLines: Int = 10) -> Int {
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        let tail = lines.suffix(tailLines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: "\n")
+        return tail.hashValue
     }
 
     private func capturePane(for codexSession: CodexSession?) -> String? {

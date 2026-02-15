@@ -908,14 +908,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for codexSession in codexSessions {
             let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
-            if status == .waitingInput {
+            let isAcked = CodexStatusReceiver.shared.isAcknowledged(cwd: codexSession.cwd)
+            if status == .waitingInput && !isAcked {
                 let waitingReason = CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
                 if waitingReason == .permissionPrompt {
                     red += 1
                 } else {
                     yellow += 1
                 }
-            } else if status == .running {
+            } else if status == .running || (status == .waitingInput && isAcked) {
                 green += 1
             }
         }
@@ -938,19 +939,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Get real-time status from CodexStatusReceiver
         let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
+        let isAcked = CodexStatusReceiver.shared.isAcknowledged(cwd: codexSession.cwd)
         let waitingReason = (status == .waitingInput)
             ? CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
             : nil
+        let displayStatus: CodexStatus = (isAcked && status == .waitingInput) ? .running : status
         let symbolColor: NSColor
-        if status == .stopped {
+        if displayStatus == .stopped {
             symbolColor = NSColor.systemGray
-        } else if status == .waitingInput {
+        } else if displayStatus == .waitingInput {
             symbolColor = (waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
         } else {
             symbolColor = theme.greenColor
         }
         let symbol: String
-        switch status {
+        switch displayStatus {
         case .running: symbol = "●"
         case .waitingInput: symbol = "◐"
         case .stopped: symbol = "✓"
@@ -998,9 +1001,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Line 3:   Environment • Status • HH:mm
         let envLabel = env.displayName
         let statusLabel: String
-        if status == .waitingInput {
+        if displayStatus == .waitingInput {
             statusLabel = (waitingReason == .permissionPrompt) ? "Permission" : "Waiting"
-        } else if status == .stopped {
+        } else if displayStatus == .stopped {
             statusLabel = "Stopped"
         } else {
             statusLabel = "Running"
@@ -1069,6 +1072,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         CodexFocusHelper.focus(session: codexSession)
+        CodexStatusReceiver.shared.acknowledge(cwd: codexSession.cwd)
+        refreshUI()
         DebugLog.log("[AppDelegate] Focused Codex session: \(codexSession.projectName)")
     }
 
