@@ -68,6 +68,7 @@ final class SessionTests: XCTestCase {
 
     func testWaitingReasonRawValues() {
         XCTAssertEqual(WaitingReason.permissionPrompt.rawValue, "permission_prompt")
+        XCTAssertEqual(WaitingReason.askUserQuestion.rawValue, "askUserQuestion")
         XCTAssertEqual(WaitingReason.stop.rawValue, "stop")
         XCTAssertEqual(WaitingReason.unknown.rawValue, "unknown")
     }
@@ -94,5 +95,31 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(decodedSession.cwd, originalSession.cwd)
         XCTAssertEqual(decodedSession.tty, originalSession.tty)
         XCTAssertEqual(decodedSession.status, originalSession.status)
+    }
+
+    func testSessionJSONRoundTripWithQuestionFields() throws {
+        var originalSession = makeSession(
+            sessionId: "json-question",
+            cwd: "/Users/test/project",
+            tty: "/dev/ttys006",
+            status: .waitingInput
+        )
+        originalSession.waitingReason = .askUserQuestion
+        originalSession.questionText = "Which option?"
+        originalSession.questionOptions = ["A", "B"]
+        originalSession.questionSelected = 0
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(originalSession)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decodedSession = try decoder.decode(Session.self, from: data)
+
+        XCTAssertEqual(decodedSession.waitingReason, .askUserQuestion)
+        XCTAssertEqual(decodedSession.questionText, "Which option?")
+        XCTAssertEqual(decodedSession.questionOptions ?? [], ["A", "B"])
+        XCTAssertEqual(decodedSession.questionSelected, 0)
     }
 }
