@@ -54,6 +54,8 @@ final class SessionListWindowController {
     /// Session count when user resized (to detect significant changes)
     private var sessionCountAtResize = 0
 
+    private let positionKey = "SessionListWindowOrigin"
+
     private init() {}
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -81,11 +83,19 @@ final class SessionListWindowController {
             newPanel.setContentSize(NSSize(width: fixedWidth, height: height))
             newPanel.minSize = NSSize(width: fixedWidth, height: 100)
             newPanel.maxSize = NSSize(width: fixedWidth, height: CGFloat.greatestFiniteMagnitude)
-            newPanel.setFrameAutosaveName("SessionListWindow")
 
             panel = newPanel
 
-            // Enforce required height even when autosaved frame was too small.
+            // Restore saved window position (size is always calculated dynamically)
+            if let saved = UserDefaults.standard.dictionary(forKey: positionKey),
+               let x = saved["x"] as? CGFloat,
+               let y = saved["y"] as? CGFloat {
+                var frame = newPanel.frame
+                frame.origin = NSPoint(x: x, y: y)
+                frame = clampedToVisibleScreen(frame, panel: newPanel)
+                newPanel.setFrame(frame, display: false)
+            }
+
             updateWindowSize(sessionCount: sessionCount)
         } else {
             // Re-showing: reset flag and update size
@@ -99,6 +109,10 @@ final class SessionListWindowController {
     }
 
     func closeWindow() {
+        if let frame = panel?.frame {
+            let origin: [String: CGFloat] = ["x": frame.origin.x, "y": frame.origin.y]
+            UserDefaults.standard.set(origin, forKey: positionKey)
+        }
         panel?.close()
     }
 
@@ -131,6 +145,7 @@ final class SessionListWindowController {
         frame.origin.y -= heightDiff  // Keep top position stable
         frame = clampedToVisibleScreen(frame, panel: panel)
         panel.setFrame(frame, display: true, animate: true)
+        panel.invalidateShadow()
     }
 
     /// Called when user manually resizes the window
@@ -154,6 +169,11 @@ final class SessionListWindowController {
         frame.origin.y -= heightDiff  // Keep top position stable
         frame = clampedToVisibleScreen(frame, panel: panel)
         panel.setFrame(frame, display: true, animate: false)
+
+        // Force recalculation of hit-test regions for this transparent window.
+        // Without this, the opaque area map becomes stale after setFrame and
+        // subsequent drag gestures may fail to register.
+        panel.invalidateShadow()
 
         // Mark as user-resized
         markUserResized(sessionCount: sessionCount)
@@ -190,7 +210,7 @@ final class SessionListWindowController {
         let rowHeight: CGFloat = 76
         let rowSpacing: CGFloat = 6
         let scrollViewPadding: CGFloat = 24
-        let resizeHandleHeight: CGFloat = 18
+        let resizeHandleHeight: CGFloat = 24
         let safetyBuffer: CGFloat = 16
 
         let n = max(sessionCount, 1)
@@ -245,56 +265,53 @@ struct SessionListWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Main content with clipShape
-            Group {
-                VStack(spacing: 0) {
-                    // Filter toggle bar
-                    HStack(spacing: 8) {
-                        FilterToggleButton(label: "CC", isOn: showCC) {
-                            showCC.toggle()
-                        }
-                        FilterToggleButton(label: "Codex", isOn: showCodex) {
-                            showCodex.toggle()
-                        }
-                        Spacer()
+            VStack(spacing: 0) {
+                // Filter toggle bar
+                HStack(spacing: 8) {
+                    FilterToggleButton(label: "CC", isOn: showCC) {
+                        showCC.toggle()
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    FilterToggleButton(label: "Codex", isOn: showCodex) {
+                        showCodex.toggle()
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
-                    if filteredCCSessions.isEmpty && filteredCodexSessions.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "tray")
-                                .font(.system(size: 36, weight: .light))
-                                .foregroundColor(.gray)
-                            Text("No active sessions")
-                                .font(.system(size: 13))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 6) {
-                                ForEach(filteredCCSessions) { session in
-                                    PinnedSessionRowView(session: session, observer: observer)
-                                        .id("\(session.id)-\(session.updatedAt.timeIntervalSince1970)-\(session.status)")
-                                }
-                                ForEach(filteredCodexSessions) { codexSession in
-                                    PinnedCodexSessionRowView(codexSession: codexSession)
-                                }
+                if filteredCCSessions.isEmpty && filteredCodexSessions.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 36, weight: .light))
+                            .foregroundColor(.gray)
+                        Text("No active sessions")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(filteredCCSessions) { session in
+                                PinnedSessionRowView(session: session, observer: observer)
+                                    .id("\(session.id)-\(session.updatedAt.timeIntervalSince1970)-\(session.status)")
                             }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 10)
+                            ForEach(filteredCodexSessions) { codexSession in
+                                PinnedCodexSessionRowView(codexSession: codexSession)
+                            }
                         }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 10)
                     }
                 }
             }
-            .background(Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 0.95)))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            // Resize handle below (not overlapping content)
+            // Resize handle (inside background so it receives mouse events)
             ResizeHandleView(sessionCount: totalSessionCount, dragStartHeight: $dragStartHeight)
         }
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 0.95)))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onChange(of: totalSessionCount) { newCount in
             SessionListWindowController.shared.updateWindowSize(sessionCount: newCount)
         }
@@ -340,18 +357,17 @@ struct ResizeHandleView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Visual grip indicator
-            HStack(spacing: 2) {
+            HStack(spacing: 3) {
                 ForEach(0..<3, id: \.self) { _ in
                     Circle()
-                        .fill(Color(white: isHovering || isDragging ? 0.5 : 0.3))
-                        .frame(width: 4, height: 4)
+                        .fill(Color(white: isHovering || isDragging ? 0.55 : 0.35))
+                        .frame(width: 5, height: 5)
                 }
             }
-            .frame(height: 12)
+            .frame(height: 14)
             .frame(maxWidth: .infinity)
-            .background(Color.clear)
         }
-        .frame(height: 16)
+        .frame(height: 24)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .background(CursorArea(cursor: .resizeUpDown))
