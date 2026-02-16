@@ -2,7 +2,7 @@
 
 A native macOS menu bar app for real-time monitoring of Claude Code sessions.
 
-![Screenshot](assets/screenshot-v3.png)
+![Screenshot](assets/screenshot-v4.png)
 
 ## Features
 
@@ -22,6 +22,7 @@ Click the menu to see session details:
 Access the submenu for quick actions:
 - **Open in Finder** - Open the project directory
 - **Copy Path/TTY** - Copy to clipboard
+- **Copy Attach Command** - For detached tmux sessions
 
 ### Global Hotkey
 Enable **⌘⇧C** (Cmd+Shift+C) in Settings to quickly focus waiting sessions without using the menu bar.
@@ -46,14 +47,34 @@ Applies to both Claude Code and Codex sessions. When not running in tmux, all mo
 ### Notification Actions
 When a session needs attention, notifications include a **Focus Terminal** button for instant access.
 
+### Pin as Window
+Open a floating session list window via **Settings → Pin as Window**. The window stays visible independently of the menu bar, so you can always see your session status at a glance.
+
+### Color Theme
+Customize menu bar status colors via **Settings → Color Theme**:
+
+| Theme | Description |
+|-------|-------------|
+| **Vibrant** (default) | Bright system colors |
+| **Muted** | Softer tones (yellow → tan) |
+| **Warm** | Orange-tinted palette |
+| **Cool** | Cyan/teal palette |
+
+### Session Timeout
+Configure how long inactive sessions remain visible via **Settings → Session Timeout** (1h, 3h, 6h, 12h, 24h, or Never).
+
 ### Autofocus
 Enable in **Settings → Autofocus** to automatically focus your terminal when a session transitions to waiting. No more manual window switching.
 
 - Focuses the highest priority session (red > yellow, most recent first)
 - 500ms debounce prevents rapid focus switching
 - 30s per-session cooldown avoids repeated focus on the same session
+- Suppressed while typing (3s cooldown, includes IME toggle keys)
 - Skips detached tmux sessions (no terminal to focus)
 - Auto-acknowledges the focused session
+
+### Codex Support
+OpenAI Codex CLI sessions are monitored alongside Claude Code sessions with the same status display, notifications, and autofocus behavior.
 
 ### Auto Setup
 On first launch, the app automatically:
