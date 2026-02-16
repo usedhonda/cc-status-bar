@@ -4,15 +4,21 @@ A native macOS menu bar app for real-time monitoring of Claude Code sessions.
 
 ![Screenshot](assets/screenshot-v5.png)
 
+- **Never miss a prompt** — Red/yellow alerts when sessions need your attention
+- **One-click focus** — Click a session to jump to the right terminal, tab, or editor window
+- **Multi-session at a glance** — Monitor all Claude Code and Codex sessions from a single icon
+
 ## Features
 
-### Menu Bar Display
+### Core
+
+#### Menu Bar Display
 - **🟢 Green** = Sessions running
 - **🔴 Red** = Permission prompt waiting (highest priority)
 - **🟡 Yellow** = Command completion waiting
 - **⚪ White** = Idle (no active sessions)
 
-### Session List
+#### Session List
 Click the menu to see session details:
 ```
 ● cc-status-bar
@@ -24,7 +30,7 @@ Access the submenu for quick actions:
 - **Copy Path/TTY** - Copy to clipboard
 - **Copy Attach Command** - For detached tmux sessions
 
-### Global Hotkey
+#### Global Hotkey
 Enable **⌘⇧C** (Cmd+Shift+C) in Settings to quickly focus waiting sessions without using the menu bar.
 
 When triggered:
@@ -32,7 +38,24 @@ When triggered:
 2. If no waiting sessions, focuses the most recent session
 3. If no sessions, opens the menu
 
-### Session Display Mode
+#### Autofocus
+Enable in **Settings → Autofocus** to automatically bring the waiting terminal
+to the front. When Claude needs permission or finishes a command, the right
+terminal window appears — no manual switching needed.
+
+- Focuses the highest priority session (red > yellow, most recent first)
+- 500ms debounce prevents rapid focus switching
+- 30s per-session cooldown avoids repeated focus on the same session
+- Suppressed while typing (3s cooldown, includes IME toggle keys)
+- Skips detached tmux sessions (no terminal to focus)
+- Auto-acknowledges the focused session
+
+#### Notification Actions
+When a session needs attention, notifications include a **Focus Terminal** button for instant access.
+
+### Customize
+
+#### Session Display Mode
 Customize what is shown as the session name in the menu. Access via **Settings → Session Display**:
 
 | Mode | Display |
@@ -44,13 +67,10 @@ Customize what is shown as the session name in the menu. Access via **Settings �
 
 Applies to both Claude Code and Codex sessions. When not running in tmux, all modes fall back to Project Name.
 
-### Notification Actions
-When a session needs attention, notifications include a **Focus Terminal** button for instant access.
-
-### Pin as Window
+#### Pin as Window
 Open a floating session list window via **Settings → Pin as Window**. The window stays visible independently of the menu bar, so you can always see your session status at a glance.
 
-### Color Theme
+#### Color Theme
 Customize menu bar status colors via **Settings → Color Theme**:
 
 | Theme | Description |
@@ -60,27 +80,111 @@ Customize menu bar status colors via **Settings → Color Theme**:
 | **Warm** | Orange-tinted palette |
 | **Cool** | Cyan/teal palette |
 
-### Session Timeout
+#### Session Timeout
 Configure how long inactive sessions remain visible via **Settings → Session Timeout** (1h, 3h, 6h, 12h, 24h, or Never).
 
-### Autofocus
-Enable in **Settings → Autofocus** to automatically focus your terminal when a session transitions to waiting. No more manual window switching.
+### Integrations
 
-- Focuses the highest priority session (red > yellow, most recent first)
-- 500ms debounce prevents rapid focus switching
-- 30s per-session cooldown avoids repeated focus on the same session
-- Suppressed while typing (3s cooldown, includes IME toggle keys)
-- Skips detached tmux sessions (no terminal to focus)
-- Auto-acknowledges the focused session
-
-### Codex Support
+#### Codex Support
 OpenAI Codex CLI sessions are monitored alongside Claude Code sessions with the same status display, notifications, and autofocus behavior.
 
-### Auto Setup
-On first launch, the app automatically:
-- Creates symlink for Claude Code hooks
-- Registers hooks in `~/.claude/settings.json`
-- Creates backup of existing settings
+#### Stream Deck Plugin
+
+Install the included Elgato Stream Deck plugin:
+
+1. Double-click `CC Status Bar.streamDeckPlugin` in the DMG
+2. Stream Deck app will open and install the plugin automatically
+
+**Available Actions:**
+| Action | Function |
+|--------|----------|
+| Session | Display and focus Claude Code sessions |
+| Up/Down Arrow | Send arrow keys (for prompt selection) |
+| Enter | Send Enter key |
+| Escape | Send Escape key |
+| Dictation | Toggle macOS dictation |
+
+#### iOS Remote Monitoring (vibeterm)
+
+Monitor Claude Code sessions from your iPhone using the companion app [vibeterm](https://apps.apple.com/app/vibeterm).
+
+**Setup:**
+1. Enable "Web Server" in Settings menu
+2. Click "Connect Mobile..." in the menu bar
+3. Choose connection type:
+   - **Local** - Same WiFi network only
+   - **TS IP** - Tailscale IP address (e.g., `100.x.x.x`)
+   - **TS Host** - Tailscale hostname (recommended for stability)
+4. Scan the QR code with vibeterm app
+
+**Requirements:**
+- [Tailscale](https://tailscale.com/) installed on both Mac and iPhone (for remote access)
+- Both devices connected to the same Tailscale network
+- iOS app: Allow "Local Network" access in iOS Settings
+
+#### CCSB Events Protocol
+
+CC Status Bar supports a standardized event protocol for integration with external CLI tools.
+
+**Event Types:**
+
+| Event | Description |
+|-------|-------------|
+| `session.start` | Session started |
+| `session.stop` | Session ended |
+| `session.waiting` | Waiting for user input |
+| `session.running` | Running/executing |
+| `artifact.link` | Link to artifact (file, URL, PR) |
+
+**Attention Levels:**
+
+| Level | Color | Description |
+|-------|-------|-------------|
+| `green` | 🟢 | Running, no action needed |
+| `yellow` | 🟡 | Waiting for input |
+| `red` | 🔴 | Error or critical |
+| `none` | ⚪ | Stopped |
+
+**CLI Usage:**
+
+```bash
+# Start a session
+CCStatusBar emit --tool aider --event session.start --session-id my-session-001
+
+# Mark as waiting
+CCStatusBar emit --tool terraform --event session.waiting --session-id tf-plan-001 \
+  --summary "Waiting for plan approval"
+
+# Stop a session
+CCStatusBar emit --tool aider --event session.stop --session-id my-session-001
+```
+
+**JSON Format:**
+
+```json
+{
+  "proto": "ccsb.v1",
+  "event": "session.waiting",
+  "session_id": "unique-id",
+  "timestamp": "2026-01-19T12:00:00Z",
+  "tool": {
+    "name": "aider",
+    "version": "0.50.0"
+  },
+  "cwd": "/path/to/project",
+  "tty": "/dev/ttys001",
+  "attention": {
+    "level": "yellow",
+    "reason": "Waiting for user input"
+  },
+  "summary": "Waiting for input"
+}
+```
+
+Pipe JSON directly:
+```bash
+echo '{"proto":"ccsb.v1",...}' | CCStatusBar emit --json
+```
 
 ## Supported Environments
 
@@ -158,6 +262,8 @@ CC Status Bar uses OSC escape sequences to set unique tab titles for reliable id
 4. Grant Accessibility permission when prompted
 5. Follow the setup wizard
 
+The app automatically configures Claude Code hooks on first launch — no manual setup required.
+
 > **Note**: The app is notarized by Apple, so it opens without Gatekeeper warnings.
 
 ### From Source
@@ -187,40 +293,6 @@ This dev variant uses separate paths/settings from production:
 - `~/Library/Application Support/CCStatusBarDev`
 - UserDefaults suite: `com.ccstatusbar.dev`
 - Hook command name: `CCStatusBarDev`
-
-### Stream Deck Plugin (Optional)
-
-If you have an Elgato Stream Deck, install the included plugin:
-
-1. Double-click `CC Status Bar.streamDeckPlugin` in the DMG
-2. Stream Deck app will open and install the plugin automatically
-
-**Available Actions:**
-| Action | Function |
-|--------|----------|
-| Session | Display and focus Claude Code sessions |
-| Up/Down Arrow | Send arrow keys (for prompt selection) |
-| Enter | Send Enter key |
-| Escape | Send Escape key |
-| Dictation | Toggle macOS dictation |
-
-### iOS Remote Monitoring (Optional)
-
-Monitor Claude Code sessions from your iPhone using the companion app [vibeterm](https://apps.apple.com/app/vibeterm).
-
-**Setup:**
-1. Enable "Web Server" in Settings menu
-2. Click "Connect Mobile..." in the menu bar
-3. Choose connection type:
-   - **Local** - Same WiFi network only
-   - **TS IP** - Tailscale IP address (e.g., `100.x.x.x`)
-   - **TS Host** - Tailscale hostname (recommended for stability)
-4. Scan the QR code with vibeterm app
-
-**Requirements:**
-- [Tailscale](https://tailscale.com/) installed on both Mac and iPhone (for remote access)
-- Both devices connected to the same Tailscale network
-- iOS app: Allow "Local Network" access in iOS Settings
 
 ## Permissions
 
@@ -265,70 +337,6 @@ CCStatusBar list
 
 # Emit CCSB protocol event (for external tools)
 CCStatusBar emit --tool aider --event session.start --session-id abc123
-```
-
-## CCSB Events Protocol
-
-CC Status Bar supports a standardized event protocol for integration with external CLI tools.
-
-### Event Types
-
-| Event | Description |
-|-------|-------------|
-| `session.start` | Session started |
-| `session.stop` | Session ended |
-| `session.waiting` | Waiting for user input |
-| `session.running` | Running/executing |
-| `artifact.link` | Link to artifact (file, URL, PR) |
-
-### Attention Levels
-
-| Level | Color | Description |
-|-------|-------|-------------|
-| `green` | 🟢 | Running, no action needed |
-| `yellow` | 🟡 | Waiting for input |
-| `red` | 🔴 | Error or critical |
-| `none` | ⚪ | Stopped |
-
-### CLI Usage
-
-```bash
-# Start a session
-CCStatusBar emit --tool aider --event session.start --session-id my-session-001
-
-# Mark as waiting
-CCStatusBar emit --tool terraform --event session.waiting --session-id tf-plan-001 \
-  --summary "Waiting for plan approval"
-
-# Stop a session
-CCStatusBar emit --tool aider --event session.stop --session-id my-session-001
-```
-
-### JSON Format
-
-```json
-{
-  "proto": "ccsb.v1",
-  "event": "session.waiting",
-  "session_id": "unique-id",
-  "timestamp": "2026-01-19T12:00:00Z",
-  "tool": {
-    "name": "aider",
-    "version": "0.50.0"
-  },
-  "cwd": "/path/to/project",
-  "tty": "/dev/ttys001",
-  "attention": {
-    "level": "yellow",
-    "reason": "Waiting for user input"
-  },
-  "summary": "Waiting for input"
-}
-```
-
-Pipe JSON directly:
-```bash
-echo '{"proto":"ccsb.v1",...}' | CCStatusBar emit --json
 ```
 
 ## Security & Privacy
