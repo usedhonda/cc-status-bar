@@ -635,7 +635,7 @@ OFF (opt-in). Enabled via Settings > Autofocus toggle.
 - Session is already acknowledged
 - Session is on cooldown
 - tmux session is detached (no terminal to focus)
-- User is typing (keystroke within last 2 seconds)
+- User is typing (keystroke within last 3 seconds; monitors both `.keyDown` and `.flagsChanged` to capture IME toggle keys like Eisu/Kana)
 - IME composition in progress (marked text detected via Accessibility API)
 
 ### 14.5.7 Relationship with Other Features

@@ -21,14 +21,14 @@ final class AutofocusManager {
     /// Typing detection: suppress autofocus while user is typing
     private var lastKeystrokeTime: Date?
     private var keyMonitor: Any?
-    private let typingCooldown: TimeInterval = 2.0
+    private let typingCooldown: TimeInterval = 3.0
 
     private init() {
         startKeyMonitor()
     }
 
     private func startKeyMonitor() {
-        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] _ in
             Task { @MainActor in
                 self?.lastKeystrokeTime = Date()
             }
@@ -37,21 +37,32 @@ final class AutofocusManager {
 
     private func isUserTyping() -> Bool {
         // Recent keystroke check
-        if let last = lastKeystrokeTime,
-           Date().timeIntervalSince(last) < typingCooldown {
-            return true
+        if let last = lastKeystrokeTime {
+            let elapsed = Date().timeIntervalSince(last)
+            if elapsed < typingCooldown {
+                DebugLog.log("[AutofocusManager] isUserTyping: keystroke \(String(format: "%.1f", elapsed))s ago (< \(typingCooldown)s cooldown)")
+                return true
+            }
         }
         // IME composition check (marked text in focused element)
         let systemWide = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
+        let focusResult = AXUIElementCopyAttributeValue(
             systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef
-        ) == .success else { return false }
+        )
+        guard focusResult == .success else {
+            DebugLog.log("[AutofocusManager] isUserTyping: failed to get focused element (error: \(focusResult.rawValue))")
+            return false
+        }
         var markedRangeRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(
+        let markedResult = AXUIElementCopyAttributeValue(
             focusedRef as! AXUIElement, "AXMarkedTextRange" as CFString, &markedRangeRef
         )
-        return result == .success && markedRangeRef != nil
+        let hasMarkedText = markedResult == .success && markedRangeRef != nil
+        if hasMarkedText {
+            DebugLog.log("[AutofocusManager] isUserTyping: IME composition in progress (marked text detected)")
+        }
+        return hasMarkedText
     }
 
     // MARK: - Public API
