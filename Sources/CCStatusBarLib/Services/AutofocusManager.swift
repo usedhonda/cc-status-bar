@@ -20,22 +20,77 @@ final class AutofocusManager {
 
     /// Typing detection: suppress autofocus while user is typing
     private var lastKeystrokeTime: Date?
-    private var keyMonitor: Any?
-    private let typingCooldown: TimeInterval = 3.0
+    private var eventTap: CFMachPort?
+    private var keyMonitor: Any?  // NSEvent fallback
+    private let typingCooldown: TimeInterval = 5.0
+    private var lastKeystrokeLogTime: Date?
+    private let maxAutofocusRetries = 3
+
+    /// Known terminal app bundle IDs (don't suppress autofocus for their text fields)
+    private let terminalBundleIds: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "com.mitchellh.ghostty",
+        "dev.warp.Warp-Stable",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "net.kovidgoyal.kitty",
+    ]
 
     private init() {
         startKeyMonitor()
     }
 
     private func startKeyMonitor() {
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .tailAppendEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: { _, type, event, refcon -> Unmanaged<CGEvent>? in
+                if let refcon = refcon {
+                    let manager = Unmanaged<AutofocusManager>.fromOpaque(refcon).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        manager.lastKeystrokeTime = Date()
+                        // Throttled logging: only log every 5 seconds
+                        let now = Date()
+                        if manager.lastKeystrokeLogTime == nil || now.timeIntervalSince(manager.lastKeystrokeLogTime!) >= 5.0 {
+                            manager.lastKeystrokeLogTime = now
+                            DebugLog.log("[AutofocusManager] Keystroke detected (CGEventTap)")
+                        }
+                    }
+                }
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            DebugLog.log("[AutofocusManager] Failed to create CGEventTap — falling back to NSEvent monitor")
+            startNSEventKeyMonitor()
+            return
+        }
+
+        eventTap = tap
+        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        DebugLog.log("[AutofocusManager] CGEventTap key monitor started")
+    }
+
+    /// Fallback: NSEvent-based key monitor (less reliable on newer macOS)
+    private func startNSEventKeyMonitor() {
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] _ in
-            Task { @MainActor in
+            DispatchQueue.main.async {
                 self?.lastKeystrokeTime = Date()
             }
         }
+        DebugLog.log("[AutofocusManager] NSEvent key monitor registered (fallback): \(keyMonitor != nil)")
     }
 
     private func isUserTyping() -> Bool {
+        DebugLog.log("[AutofocusManager] isUserTyping check: lastKeystrokeTime=\(lastKeystrokeTime?.description ?? "nil")")
+
         // Recent keystroke check
         if let last = lastKeystrokeTime {
             let elapsed = Date().timeIntervalSince(last)
@@ -44,6 +99,16 @@ final class AutofocusManager {
                 return true
             }
         }
+
+        // Active text field check in non-terminal apps (extended cooldown window)
+        if isFrontAppTextFieldActive(), let last = lastKeystrokeTime {
+            let elapsed = Date().timeIntervalSince(last)
+            if elapsed < typingCooldown * 2 {
+                DebugLog.log("[AutofocusManager] isUserTyping: text field active + keystroke \(String(format: "%.1f", elapsed))s ago")
+                return true
+            }
+        }
+
         // IME composition check (marked text in focused element)
         let systemWide = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
@@ -63,6 +128,29 @@ final class AutofocusManager {
             DebugLog.log("[AutofocusManager] isUserTyping: IME composition in progress (marked text detected)")
         }
         return hasMarkedText
+    }
+
+    /// Check if the frontmost non-terminal app has an active text input field
+    private func isFrontAppTextFieldActive() -> Bool {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontApp.bundleIdentifier else {
+            return false
+        }
+        // Don't suppress autofocus for terminal text fields (they're always "active")
+        if terminalBundleIds.contains(bundleId) {
+            return false
+        }
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success else {
+            return false
+        }
+        var roleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedRef as! AXUIElement, kAXRoleAttribute as CFString, &roleRef) == .success else {
+            return false
+        }
+        let role = roleRef as? String ?? ""
+        return ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role)
     }
 
     // MARK: - Public API
@@ -120,11 +208,19 @@ final class AutofocusManager {
         return Date().timeIntervalSince(lastTime) < cooldownInterval
     }
 
-    private func performAutofocus(candidates: [Session]) {
+    private func performAutofocus(candidates: [Session], retryCount: Int = 0) {
         guard AppSettings.autofocusEnabled else { return }
 
         if isUserTyping() {
-            DebugLog.log("[AutofocusManager] User typing, skipping autofocus")
+            if retryCount < maxAutofocusRetries {
+                DebugLog.log("[AutofocusManager] User typing, retrying in \(typingCooldown)s (attempt \(retryCount + 1)/\(maxAutofocusRetries))")
+                let retryItem = DispatchWorkItem { [weak self] in
+                    self?.performAutofocus(candidates: candidates, retryCount: retryCount + 1)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + typingCooldown, execute: retryItem)
+            } else {
+                DebugLog.log("[AutofocusManager] User typing, max retries reached — dropping autofocus")
+            }
             return
         }
 
@@ -172,11 +268,19 @@ final class AutofocusManager {
         }
     }
 
-    private func performCodexAutofocus(codexSession: CodexSession, isRed: Bool) {
+    private func performCodexAutofocus(codexSession: CodexSession, isRed: Bool, retryCount: Int = 0) {
         guard AppSettings.autofocusEnabled else { return }
 
         if isUserTyping() {
-            DebugLog.log("[AutofocusManager] User typing, skipping Codex autofocus")
+            if retryCount < maxAutofocusRetries {
+                DebugLog.log("[AutofocusManager] User typing, retrying Codex autofocus in \(typingCooldown)s (attempt \(retryCount + 1)/\(maxAutofocusRetries))")
+                let retryItem = DispatchWorkItem { [weak self] in
+                    self?.performCodexAutofocus(codexSession: codexSession, isRed: isRed, retryCount: retryCount + 1)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + typingCooldown, execute: retryItem)
+            } else {
+                DebugLog.log("[AutofocusManager] User typing, max retries reached — dropping Codex autofocus")
+            }
             return
         }
 
