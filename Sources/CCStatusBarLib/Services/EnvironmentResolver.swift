@@ -185,19 +185,33 @@ final class EnvironmentResolver {
         }
 
         // Priority 4: Detect terminal by running state (with tmux)
-        if hasTmux {
-            // Check if Ghostty has a tab with this tmux session name
+        if hasTmux, let name = tmuxSessionName {
+            // 4a: Use tmux client info for accurate terminal detection
+            if let detected = TmuxHelper.getClientTerminalInfo(for: name)?.lowercased() {
+                switch detected {
+                case "ghostty":
+                    let tabIndex = GhosttyHelper.getTabIndexByTitle(name)
+                    return .ghostty(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
+                case "iterm.app":
+                    let tabIndex = ITerm2Helper.getTabIndexByName(name)
+                    return .iterm2(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
+                case "apple_terminal":
+                    return .terminal(hasTmux: true, tmuxSessionName: name)
+                default:
+                    break
+                }
+            }
+
+            // 4b: Fallback - Ghostty tab title match
             if GhosttyHelper.isRunning,
-               let name = tmuxSessionName,
                let tabIndex = GhosttyHelper.getTabIndexByTitle(name) {
                 return .ghostty(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
             }
-            // Check if iTerm2 is running
-            if ITerm2Helper.isRunning, let name = tmuxSessionName {
-                let tabIndex = ITerm2Helper.getTabIndexByName(name)
-                return .iterm2(hasTmux: true, tabIndex: tabIndex, tmuxSessionName: name)
-            }
-            // tmux only (no known terminal)
+
+            // tmux only (no known terminal or detached)
+            return .tmuxOnly(sessionName: name)
+        }
+        if hasTmux {
             return .tmuxOnly(sessionName: tmuxSessionName ?? "unknown")
         }
 

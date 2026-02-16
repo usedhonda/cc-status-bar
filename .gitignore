@@ -37,3 +37,7 @@ CCStatusBar.dmg
 CCStatusBar.app/Contents/CodeResources
 CCStatusBar.app/Contents/_CodeSignature/
 secrets/
+
+.codex/config.toml
+
+AGENTS.md
