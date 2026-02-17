@@ -74,6 +74,7 @@ final class SessionListWindowController {
             newPanel.isMovableByWindowBackground = true
             newPanel.isOpaque = false
             newPanel.backgroundColor = .clear
+            newPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
             // Dynamic height based on total session count (CC + Codex)
             let codexCount = AppSettings.showCodexSessions ? currentCodexSessionCount() : 0
