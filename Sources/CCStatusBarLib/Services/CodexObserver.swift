@@ -43,15 +43,12 @@ enum CodexObserver {
             }
         }
 
-        // Empty or expired: synchronous fetch (unavoidable on first call)
-        let sessions = fetchCodexSessions()
-        sessionsCache = (sessions, now)
-
-        if !sessions.isEmpty {
-            DebugLog.log("[CodexObserver] Found \(sessions.count) active Codex session(s)")
-        }
-
-        return sessions
+        // Empty or expired: return empty and fetch in background
+        // Never block the main thread with synchronous Process calls —
+        // waitUntilExit() spins the RunLoop, which can trigger SwiftUI body
+        // re-evaluation and cause re-entrant crashes (EXC_BAD_ACCESS).
+        triggerBackgroundRefresh()
+        return sessionsCache?.sessions ?? [:]
     }
 
     /// Check if Codex is running for a specific cwd
@@ -315,6 +312,8 @@ enum CodexObserver {
     }
 
     /// Run a shell command and return output
+    /// Uses DispatchSemaphore instead of waitUntilExit() to avoid spinning the
+    /// CFRunLoop, which can trigger re-entrant SwiftUI layout and crash.
     private static func runCommand(_ executable: String, _ args: [String]) -> String {
         let process = Process()
         let pipe = Pipe()
@@ -324,8 +323,10 @@ enum CodexObserver {
         process.standardError = FileHandle.nullDevice
 
         do {
+            let semaphore = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in semaphore.signal() }
             try process.run()
-            process.waitUntilExit()
+            semaphore.wait()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
