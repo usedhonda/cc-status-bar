@@ -32,6 +32,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Run setup check (handles first run, app move, repair)
         SetupManager.shared.checkAndRunSetup()
 
+        // Assign default alert sound for first-time users only.
+        AppSettings.initializeDefaultAlertSoundIfNeeded()
+
         // Initialize notification manager and request permission
         if AppSettings.notificationsEnabled {
             NotificationManager.shared.requestPermission()
@@ -444,6 +447,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifyItem.state = AppSettings.notificationsEnabled ? .on : .off
         menu.addItem(notifyItem)
 
+        // Sound Alerts (submenu)
+        let soundItem = NSMenuItem(title: "Sound Alerts", action: nil, keyEquivalent: "")
+        soundItem.submenu = createSoundAlertsMenu()
+        menu.addItem(soundItem)
+
         // Autofocus
         let autofocusItem = NSMenuItem(
             title: "Autofocus",
@@ -483,9 +491,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // vibeterm (iOS app) submenu
-        let vibetermItem = NSMenuItem(title: "vibeterm", action: nil, keyEquivalent: "")
-        vibetermItem.submenu = createVibetermMenu()
+        // VibeTerm (iOS app) - one-click connection setup
+        let vibetermItem = NSMenuItem(
+            title: "VibeTerm",
+            action: #selector(showIOSConnectionSetup),
+            keyEquivalent: ""
+        )
+        vibetermItem.target = self
         menu.addItem(vibetermItem)
 
         // Permissions submenu
@@ -534,6 +546,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showIOSConnectionSetup() {
+        if !WebServer.shared.isRunning {
+            do {
+                try WebServer.shared.start()
+                DebugLog.log("[AppDelegate] Web server started for VibeTerm setup")
+            } catch {
+                DebugLog.log("[AppDelegate] Failed to start web server for VibeTerm setup: \(error)")
+                showAlert(
+                    title: "VibeTerm Connection Error",
+                    message: "Failed to start web server: \(error.localizedDescription)"
+                )
+            }
+        }
         ConnectionSetupWindowController.shared.showWindow()
     }
 
@@ -543,33 +567,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.state = newState ? .on : .off
         DebugLog.log("[AppDelegate] Global hotkey \(newState ? "enabled" : "disabled")")
         refreshUI()  // Update menu to show/hide hotkey description
-    }
-
-    @MainActor @objc private func toggleWebServer(_ sender: NSMenuItem) {
-        let newState = !AppSettings.webServerEnabled
-        AppSettings.webServerEnabled = newState
-        sender.state = newState ? .on : .off
-
-        if newState {
-            do {
-                try WebServer.shared.start()
-                DebugLog.log("[AppDelegate] Web server started")
-            } catch {
-                DebugLog.log("[AppDelegate] Failed to start web server: \(error)")
-                // Revert setting on failure
-                AppSettings.webServerEnabled = false
-                sender.state = .off
-                showAlert(
-                    title: "Web Server Error",
-                    message: "Failed to start web server: \(error.localizedDescription)"
-                )
-            }
-        } else {
-            WebServer.shared.stop()
-            DebugLog.log("[AppDelegate] Web server stopped")
-        }
-
-        refreshUI()  // Update menu to show/hide port
     }
 
     private func createTimeoutMenu() -> NSMenu {
@@ -603,37 +600,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             menu.addItem(item)
         }
-
-        return menu
-    }
-
-    private func createVibetermMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        // WebSocket toggle
-        let serverRunning = WebServer.shared.isRunning
-        let serverTitle = serverRunning
-            ? "WebSocket :\(WebServer.shared.actualPort)"
-            : "WebSocket Off"
-        let serverItem = NSMenuItem(
-            title: serverTitle,
-            action: #selector(toggleWebServer(_:)),
-            keyEquivalent: ""
-        )
-        serverItem.target = self
-        serverItem.state = serverRunning ? .on : .off
-        menu.addItem(serverItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Show QR Code
-        let qrItem = NSMenuItem(
-            title: "Show QR Code...",
-            action: #selector(showIOSConnectionSetup),
-            keyEquivalent: ""
-        )
-        qrItem.target = self
-        menu.addItem(qrItem)
 
         return menu
     }
@@ -733,6 +699,105 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if newState {
             NotificationManager.shared.requestPermission()
         }
+    }
+
+    private func createSoundAlertsMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        // Enabled toggle
+        let enabledItem = NSMenuItem(
+            title: "Enabled",
+            action: #selector(toggleSoundAlerts(_:)),
+            keyEquivalent: ""
+        )
+        enabledItem.target = self
+        enabledItem.state = AppSettings.soundEnabled ? .on : .off
+        menu.addItem(enabledItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let currentPath = AppSettings.alertSoundPath
+        let isBeep = (currentPath == "beep")
+        let isCustom = currentPath != nil && currentPath != "beep" && currentPath != ""
+
+        // System Beep
+        let beepItem = NSMenuItem(
+            title: "System Beep",
+            action: #selector(selectSystemBeep(_:)),
+            keyEquivalent: ""
+        )
+        beepItem.target = self
+        beepItem.state = isBeep ? .on : .off
+        menu.addItem(beepItem)
+
+        // Custom file / Choose File
+        let customTitle = isCustom
+            ? URL(fileURLWithPath: currentPath!).lastPathComponent
+            : "Choose File..."
+        let customItem = NSMenuItem(
+            title: customTitle,
+            action: #selector(selectCustomSound(_:)),
+            keyEquivalent: ""
+        )
+        customItem.target = self
+        customItem.state = isCustom ? .on : .off
+        menu.addItem(customItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Preview
+        let previewItem = NSMenuItem(
+            title: "Preview",
+            action: #selector(previewAlertSound(_:)),
+            keyEquivalent: ""
+        )
+        previewItem.target = self
+        menu.addItem(previewItem)
+
+        return menu
+    }
+
+    @MainActor @objc private func toggleSoundAlerts(_ sender: NSMenuItem) {
+        let newState = !AppSettings.soundEnabled
+        AppSettings.soundEnabled = newState
+        sender.state = newState ? .on : .off
+        DebugLog.log("[AppDelegate] Sound alerts \(newState ? "enabled" : "disabled")")
+        if newState {
+            SoundPlayer.previewSound()
+        }
+        refreshUI()
+    }
+
+    @MainActor @objc private func selectSystemBeep(_ sender: NSMenuItem) {
+        AppSettings.alertSoundPath = "beep"
+        DebugLog.log("[AppDelegate] Alert sound set to system beep")
+        SoundPlayer.previewSound()
+        refreshUI()
+    }
+
+    @MainActor @objc private func selectCustomSound(_ sender: NSMenuItem) {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Alert Sound"
+        panel.allowedContentTypes = [
+            .audio,
+            .init(filenameExtension: "aiff")!,
+            .init(filenameExtension: "wav")!,
+            .init(filenameExtension: "mp3")!,
+        ]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        if panel.runModal() == .OK, let url = panel.url {
+            AppSettings.alertSoundPath = url.path
+            DebugLog.log("[AppDelegate] Alert sound set to: \(url.path)")
+            // Preview the selected sound
+            SoundPlayer.previewSound()
+            refreshUI()
+        }
+    }
+
+    @objc private func previewAlertSound(_ sender: NSMenuItem) {
+        SoundPlayer.previewSound()
     }
 
     @objc private func toggleAutofocus(_ sender: NSMenuItem) {

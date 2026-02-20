@@ -6,6 +6,9 @@ import ApplicationServices
 
 enum GhosttyHelper {
     static let bundleIdentifier = "com.mitchellh.ghostty"
+    private static let maxAlternativeSearchDepth = 64
+    private static let maxAlternativeSearchNodes = 5000
+    private static let maxAlternativeTabCandidates = 500
 
     // MARK: - Tab Titles Cache
 
@@ -236,27 +239,79 @@ enum GhosttyHelper {
         from element: AXUIElement,
         into results: inout [(element: AXUIElement, title: String, role: String)]
     ) {
-        var roleValue: CFTypeRef?
-        var titleValue: CFTypeRef?
-
-        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
-        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleValue)
-
-        let role = roleValue as? String ?? ""
-        let title = titleValue as? String ?? ""
-
-        // Tab elements are typically AXRadioButton or AXButton in a tab group
-        if (role == "AXRadioButton" || role == "AXButton") && !title.isEmpty {
-            results.append((element, title, role))
+        struct Node {
+            let element: AXUIElement
+            let depth: Int
         }
 
-        // Recurse into children
-        var childrenValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-           let children = childrenValue as? [AXUIElement] {
-            for child in children {
-                collectTabElements(from: child, into: &results)
+        @inline(__always)
+        func elementIdentity(_ element: AXUIElement) -> UnsafeRawPointer {
+            UnsafeRawPointer(Unmanaged.passUnretained(element).toOpaque())
+        }
+
+        var stack: [Node] = [Node(element: element, depth: 0)]
+        var visited = Set<UnsafeRawPointer>()
+        var depthLimitHit = false
+        var nodeLimitHit = false
+        var candidateLimitHit = false
+
+        while let node = stack.popLast() {
+            if node.depth > maxAlternativeSearchDepth {
+                depthLimitHit = true
+                continue
             }
+
+            let identity = elementIdentity(node.element)
+            guard visited.insert(identity).inserted else {
+                continue
+            }
+
+            if visited.count > maxAlternativeSearchNodes {
+                nodeLimitHit = true
+                break
+            }
+
+            var roleValue: CFTypeRef?
+            var titleValue: CFTypeRef?
+            AXUIElementCopyAttributeValue(node.element, kAXRoleAttribute as CFString, &roleValue)
+            AXUIElementCopyAttributeValue(node.element, kAXTitleAttribute as CFString, &titleValue)
+
+            let role = roleValue as? String ?? ""
+            let title = titleValue as? String ?? ""
+
+            // Tab elements are typically AXRadioButton or AXButton in a tab group
+            if (role == "AXRadioButton" || role == "AXButton") && !title.isEmpty {
+                results.append((node.element, title, role))
+                if results.count >= maxAlternativeTabCandidates {
+                    candidateLimitHit = true
+                    break
+                }
+            }
+
+            var childrenValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(
+                node.element,
+                kAXChildrenAttribute as CFString,
+                &childrenValue
+            ) == .success,
+                let children = childrenValue as? [AXUIElement]
+            {
+                for child in children.reversed() {
+                    stack.append(Node(element: child, depth: node.depth + 1))
+                }
+            }
+        }
+
+        if depthLimitHit {
+            DebugLog.log("[GhosttyHelper] Alternative tab search hit depth limit (\(maxAlternativeSearchDepth))")
+        }
+        if nodeLimitHit {
+            DebugLog.log("[GhosttyHelper] Alternative tab search hit node limit (\(maxAlternativeSearchNodes))")
+        }
+        if candidateLimitHit {
+            DebugLog.log(
+                "[GhosttyHelper] Alternative tab search hit candidate limit (\(maxAlternativeTabCandidates))"
+            )
         }
     }
 

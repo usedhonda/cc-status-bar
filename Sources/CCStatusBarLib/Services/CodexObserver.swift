@@ -178,16 +178,6 @@ enum CodexObserver {
             }
         }
 
-        // Backward compatibility: legacy Node/vendor launch patterns.
-        for pattern in ["codex/vendor.*codex", "@openai/codex"] {
-            let output = runCommand("/usr/bin/pgrep", ["-f", pattern])
-            for line in output.split(separator: "\n") {
-                if let pid = pid_t(line.trimmingCharacters(in: .whitespaces)) {
-                    pidSet.insert(pid)
-                }
-            }
-        }
-
         // Exclude helper/background subcommands that are not interactive Codex CLI sessions.
         // Example: `codex mcp-server` started by Claude Code.
         let filteredPIDs = pidSet.filter { pid in

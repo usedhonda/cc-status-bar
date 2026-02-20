@@ -7,7 +7,9 @@ struct ConnectionSetupView: View {
     @State private var localIP: String = "..."
     @State private var tailscaleStatus: TailscaleStatus?
     @State private var connectionURL: String?
-    @State private var copied = false
+    @State private var copiedURL = false
+    @State private var copiedWebSocket = false
+    @State private var serverErrorMessage: String?
 
     private let networkHelper = NetworkHelper.shared
     private static let appStoreURL = URL(string: "https://apps.apple.com/jp/app/vibeterm/id6758266443")!
@@ -29,8 +31,45 @@ struct ConnectionSetupView: View {
         }
     }
 
+    private var currentHostForConnection: String? {
+        switch selectedHost {
+        case .localIP:
+            return localIP == "Not available" ? nil : localIP
+        case .tailscaleIP:
+            return tailscaleStatus?.ip
+        case .tailscaleHostname:
+            return tailscaleStatus?.hostname
+        }
+    }
+
+    private var serverStatusValue: String {
+        if WebServer.shared.isRunning {
+            return "Running"
+        }
+        if let message = serverErrorMessage, !message.isEmpty {
+            return "Failed"
+        }
+        return "Not running"
+    }
+
+    private var websocketEndpointURL: String? {
+        guard WebServer.shared.isRunning else { return nil }
+        guard let host = currentHostForConnection else { return nil }
+        return "ws://\(host):\(WebServer.shared.actualPort)/ws/sessions"
+    }
+
+    private var websocketEndpointValue: String {
+        if let endpoint = websocketEndpointURL {
+            return endpoint
+        }
+        if !WebServer.shared.isRunning {
+            return "Not running"
+        }
+        return "Host unavailable"
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // Header - clickable to App Store
             Link(destination: Self.appStoreURL) {
                 HStack(spacing: 6) {
@@ -40,7 +79,7 @@ struct ConnectionSetupView: View {
                         .font(.headline)
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, 2)
 
             // Network selector (3 options)
             HStack(spacing: 0) {
@@ -50,7 +89,7 @@ struct ConnectionSetupView: View {
             }
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(6)
-            .padding(.horizontal)
+            .padding(.horizontal, 4)
 
             // QR Code
             if let url = connectionURL, let qrImage = generateQRCode(from: url) {
@@ -59,8 +98,8 @@ struct ConnectionSetupView: View {
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 200, height: 200)
-                        .padding()
+                        .frame(width: 180, height: 180)
+                        .padding(8)
                         .background(Color.white)
                         .cornerRadius(8)
                 }
@@ -71,7 +110,7 @@ struct ConnectionSetupView: View {
                 // No QR code available
                 VStack(spacing: 8) {
                     Image(systemName: "qrcode")
-                        .font(.system(size: 80))
+                        .font(.system(size: 68))
                         .foregroundColor(.secondary)
                     Text("Unable to generate QR code")
                         .foregroundColor(.secondary)
@@ -81,54 +120,74 @@ struct ConnectionSetupView: View {
                             .foregroundColor(.orange)
                             .font(.caption)
                     }
+                    if let serverErrorMessage {
+                        Text(serverErrorMessage)
+                            .foregroundColor(.secondary)
+                            .font(.caption2)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(3)
+                    }
                 }
-                .frame(width: 200, height: 200)
-                .padding()
+                .frame(width: 180, height: 180)
+                .padding(8)
             }
 
             // Connection info
-            VStack(alignment: .leading, spacing: 8) {
-                ConnectionInfoRow(label: "Name", value: Host.current().localizedName ?? "Unknown")
+            VStack(alignment: .leading, spacing: 6) {
                 ConnectionInfoRow(label: "Host", value: currentHostValue)
-                ConnectionInfoRow(label: "SSH Port", value: "22")
                 ConnectionInfoRow(
                     label: "API Port",
                     value: WebServer.shared.isRunning
                         ? String(WebServer.shared.actualPort)
                         : "Not running"
                 )
+                ConnectionInfoRow(label: "Server", value: serverStatusValue)
+                ConnectionInfoRow(label: "WebSocket", value: websocketEndpointValue)
             }
-            .padding()
+            .padding(10)
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            // Copy URL button
-            Button(action: copyURL) {
-                HStack {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    Text(copied ? "Copied!" : "Copy URL")
+            // Copy buttons
+            HStack(spacing: 8) {
+                Button(action: copyURL) {
+                    HStack {
+                        Image(systemName: copiedURL ? "checkmark" : "doc.on.doc")
+                        Text(copiedURL ? "Copied URL" : "Copy URL")
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .disabled(connectionURL == nil)
+
+                Button(action: copyWebSocketURL) {
+                    HStack {
+                        Image(systemName: copiedWebSocket ? "checkmark" : "link")
+                        Text(copiedWebSocket ? "Copied WS" : "Copy WS")
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(websocketEndpointURL == nil)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(connectionURL == nil)
 
             // Footer - clickable to App Store
             Link(destination: Self.appStoreURL) {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.down.app")
                         .font(.caption2)
-                    Text("Get VibeTerm on App Store")
-                        .font(.caption)
+                    Text("Download VibeTerm on App Store")
+                        .font(.caption2)
                 }
             }
-
-            Spacer()
         }
-        .padding()
+        .padding(12)
         .frame(width: 320, height: 460)
         .onAppear {
             loadNetworkInfo()
+            ensureWebServerRunning()
         }
     }
 
@@ -183,10 +242,33 @@ struct ConnectionSetupView: View {
     }
 
     private func updateConnectionInfo() {
+        guard WebServer.shared.isRunning else {
+            connectionURL = nil
+            return
+        }
         connectionURL = networkHelper.generateConnectionURL(
             hostType: selectedHost,
             tailscaleStatus: tailscaleStatus
         )
+    }
+
+    private func ensureWebServerRunning() {
+        guard !WebServer.shared.isRunning else {
+            serverErrorMessage = nil
+            updateConnectionInfo()
+            return
+        }
+
+        do {
+            try WebServer.shared.start()
+            serverErrorMessage = nil
+            DebugLog.log("[ConnectionSetup] Web server started")
+        } catch {
+            serverErrorMessage = error.localizedDescription
+            DebugLog.log("[ConnectionSetup] Failed to start web server: \(error)")
+        }
+
+        updateConnectionInfo()
     }
 
     private func copyURL() {
@@ -194,12 +276,25 @@ struct ConnectionSetupView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
 
-        copied = true
+        copiedURL = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            copied = false
+            copiedURL = false
         }
 
         DebugLog.log("[ConnectionSetup] Copied URL: \(url)")
+    }
+
+    private func copyWebSocketURL() {
+        guard let endpoint = websocketEndpointURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(endpoint, forType: .string)
+
+        copiedWebSocket = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            copiedWebSocket = false
+        }
+
+        DebugLog.log("[ConnectionSetup] Copied WebSocket URL: \(endpoint)")
     }
 
     private func generateQRCode(from string: String) -> NSImage? {
@@ -234,13 +329,15 @@ struct ConnectionInfoRow: View {
         HStack {
             Text(label + ":")
                 .foregroundColor(.secondary)
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: 70, alignment: .trailing)
             Text(value)
                 .fontWeight(.medium)
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
             Spacer()
         }
-        .font(.system(.body, design: .monospaced))
+        .font(.system(size: 12, design: .monospaced))
     }
 }
 

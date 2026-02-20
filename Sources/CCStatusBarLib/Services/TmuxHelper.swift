@@ -292,6 +292,25 @@ enum TmuxHelper {
         return true
     }
 
+    /// Get the client TTY for a tmux session (for sending BEL).
+    /// Uses `list-clients -t <session> -F #{client_tty}` to find the terminal TTY.
+    static func getClientTTY(for sessionName: String, socketPath: String? = nil) -> String? {
+        let args = ["list-clients", "-t", sessionName, "-F", "#{client_tty}"]
+        let output = runTmuxCommandArgs(args, socketPath: socketPath)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Take first client TTY if multiple clients are attached
+        guard let firstLine = output.split(separator: "\n").first else {
+            DebugLog.log("[TmuxHelper] No client TTY for session '\(sessionName)'")
+            return nil
+        }
+
+        let clientTTY = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clientTTY.isEmpty else { return nil }
+        DebugLog.log("[TmuxHelper] Client TTY for '\(sessionName)': \(clientTTY)")
+        return clientTTY
+    }
+
     /// Detect the parent terminal application for a tmux session (with caching)
     /// - Parameter sessionName: The tmux session name (e.g., "chrome-ai-bridge")
     /// - Returns: Terminal identifier (e.g., "ghostty", "iTerm.app") or nil

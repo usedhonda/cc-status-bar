@@ -29,6 +29,8 @@ enum AppSettings {
         static let showCodexSessions = "showCodexSessions"
         static let sessionDisplayMode = "sessionDisplayMode"
         static let autofocusEnabled = "autofocusEnabled"
+        static let soundEnabled = "soundEnabled"
+        static let alertSoundPath = "alertSoundPath"
     }
 
     /// Bundle ID for shared UserDefaults access (CLI and GUI)
@@ -44,6 +46,9 @@ enum AppSettings {
     static var userDefaultsStore: UserDefaults {
         defaults
     }
+
+    /// Default alert sound path assigned on startup for first-time users.
+    static let defaultAlertSoundPath = "/System/Library/Sounds/Ping.aiff"
 
     static var launchAtLogin: Bool {
         get { defaults.bool(forKey: Keys.launchAtLogin) }
@@ -133,6 +138,41 @@ enum AppSettings {
             return defaults.bool(forKey: Keys.autofocusEnabled)
         }
         set { defaults.set(newValue, forKey: Keys.autofocusEnabled) }
+    }
+
+    static var soundEnabled: Bool {
+        get {
+            // Default to true if not set (opt-in by default)
+            if defaults.object(forKey: Keys.soundEnabled) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Keys.soundEnabled)
+        }
+        set { defaults.set(newValue, forKey: Keys.soundEnabled) }
+    }
+
+    /// Alert sound path. "beep"/nil/empty = default alert file (with system beep fallback),
+    /// other path = custom/system file.
+    /// nil/empty means uninitialized (startup will assign default once).
+    static var alertSoundPath: String? {
+        get { defaults.string(forKey: Keys.alertSoundPath) }
+        set { defaults.set(newValue, forKey: Keys.alertSoundPath) }
+    }
+
+    /// Initialize alertSoundPath once for first-time users only.
+    /// Existing values (including "beep" and custom paths) are preserved.
+    static func initializeDefaultAlertSoundIfNeeded(
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) {
+        if let current = alertSoundPath, !current.isEmpty {
+            return
+        }
+
+        if fileExists(defaultAlertSoundPath) {
+            alertSoundPath = defaultAlertSoundPath
+        } else {
+            alertSoundPath = "beep"
+        }
     }
 
     static var sessionDisplayMode: SessionDisplayMode {
