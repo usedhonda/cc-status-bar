@@ -19,12 +19,13 @@ The first matching file wins.
   "version": 2,
   "identity": {
     "project_name": "cc-status-bar",
-    "project_reading": "シーシー ステータス バー",
+    "project_reading": "シーシーステータスバー",
     "callname": "ご主人様"
   },
   "defaults": {
     "speaker": "四国めたん",
     "style": "ノーマル",
+    "speed_scale": 1.15,
     "voice_gender": "female",
     "callname": "ご主人様"
   },
@@ -73,6 +74,7 @@ The first matching file wins.
 - `identity.project_reading`
   - Optional.
   - Katakana or VOICEVOX-friendly reading for the project name.
+  - Prefer a single uninterrupted reading without spaces so VOICEVOX reads it in one flow.
 - `identity.callname`
   - Optional.
   - Project-local default user callname.
@@ -85,6 +87,9 @@ The first matching file wins.
 - `defaults.style`
   - Optional.
   - Style display name paired with `defaults.speaker`.
+- `defaults.speed_scale`
+  - Optional.
+  - Speech speed passed into `audio_query.speedScale`.
 - `defaults.voice_gender`
   - Optional.
   - Metadata for template writing and placeholder expansion.
@@ -114,6 +119,7 @@ The first matching file wins.
   "speaker_id": 37,
   "speaker": "四国めたん",
   "style": "ノーマル",
+  "speed_scale": 1.12,
   "voice_gender": "female",
   "callname": "ご主人様",
   "weight": 2,
@@ -143,6 +149,9 @@ The first matching file wins.
 - `voice_gender`
   - Optional.
   - Metadata for template writing and placeholder expansion.
+- `speed_scale`
+  - Optional.
+  - Per-template speech speed override. Falls back to `defaults.speed_scale`.
 - `callname`
   - Optional.
   - Overrides the default user callname.

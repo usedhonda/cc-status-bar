@@ -53,6 +53,14 @@ while [ "$#" -gt 0 ]; do
       output_path="$2"
       shift 2
       ;;
+    --data-binary)
+      if [[ "$2" == @* ]]; then
+        printf 'REQUEST_BODY=%s\n' "$(cat "${2#@}")" >> "$log_file"
+      else
+        printf 'REQUEST_BODY=%s\n' "$2" >> "$log_file"
+      fi
+      shift 2
+      ;;
     http://*|https://*)
       url="$1"
       shift
@@ -229,12 +237,13 @@ test_v2_templates_expand_placeholders_and_filter_by_tool() {
   "version": 2,
   "identity": {
     "project_name": "cc-status-bar",
-    "project_reading": "シーシー ステータス バー",
+    "project_reading": "シーシーステータスバー",
     "callname": "ご主人様"
   },
   "defaults": {
     "speaker": "四国めたん",
     "style": "ノーマル",
+    "speed_scale": 1.22,
     "voice_gender": "female",
     "callname": "ご主人様"
   },
@@ -286,14 +295,16 @@ EOF
   "$VOICEVOX_SCRIPT"
 
   assert_file_contains "$debug_log" "tool_key=codex"
-  assert_file_contains "$debug_log" "project_reading=シーシー ステータス バー"
+  assert_file_contains "$debug_log" "project_reading=シーシーステータスバー"
   assert_file_contains "$debug_log" "tool_reading=コーデックス"
   assert_file_contains "$debug_log" "voice_gender=male"
   assert_file_contains "$debug_log" "callname=ご主人様"
+  assert_file_contains "$debug_log" "speed_scale=1.22"
   assert_file_contains "$debug_log" "speaker_name=波音リツ"
   assert_file_contains "$debug_log" "style_name=ノーマル"
   assert_file_contains "$debug_log" "speaker=74"
-  assert_file_contains "$curl_log" "text=シーシー ステータス バー の コーデックス です。ご主人様、返事を待っています。"
+  assert_file_contains "$curl_log" "text=シーシーステータスバー の コーデックス です。ご主人様、返事を待っています。"
+  assert_file_contains "$curl_log" "\"speedScale\": 1.22"
 }
 
 test_missing_project_file_falls_back_without_calling_voicevox() {

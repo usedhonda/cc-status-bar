@@ -301,6 +301,7 @@ run_voicevox() {
   local base_url="$1"
   local speaker="$2"
   local text="$3"
+  local speed_scale="${4:-}"
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ccsb-voicevox.XXXXXX")"
   local query_json="$tmp_dir/audio-query.json"
@@ -314,6 +315,14 @@ run_voicevox() {
     "$base_url/audio_query" \
     --output "$query_json"; then
     return 1
+  fi
+
+  if [ -n "$speed_scale" ]; then
+    local adjusted_query="$tmp_dir/audio-query-adjusted.json"
+    if ! jq --argjson speed "$speed_scale" '.speedScale = $speed' "$query_json" > "$adjusted_query"; then
+      return 1
+    fi
+    mv "$adjusted_query" "$query_json"
   fi
 
   if ! curl --silent --show-error --fail --max-time 30 \
@@ -432,6 +441,7 @@ main() {
   local speaker=""
   local speaker_name=""
   local style_name=""
+  local speed_scale=""
   speaker="$(candidate_field_or_empty "$candidates_json" "$index" "speaker_id")"
   if [ -z "$speaker" ]; then
     speaker="$(default_field_or_empty "$voice_file" "speaker_id")"
@@ -454,6 +464,11 @@ main() {
     speaker="$default_speaker"
   fi
 
+  speed_scale="$(candidate_field_or_empty "$candidates_json" "$index" "speed_scale")"
+  if [ -z "$speed_scale" ]; then
+    speed_scale="$(default_field_or_empty "$voice_file" "speed_scale")"
+  fi
+
   if [ -z "$speaker" ]; then
     play_fallback_sound
     exit 0
@@ -467,10 +482,11 @@ main() {
   debug_log "tool_reading=$tool_reading"
   debug_log "voice_gender=$voice_gender"
   debug_log "callname=$callname"
+  debug_log "speed_scale=$speed_scale"
   debug_log "text=$text"
   debug_log "reason=$waiting_reason"
 
-  if ! run_voicevox "$base_url" "$speaker" "$text"; then
+  if ! run_voicevox "$base_url" "$speaker" "$text" "$speed_scale"; then
     play_fallback_sound
     exit 0
   fi

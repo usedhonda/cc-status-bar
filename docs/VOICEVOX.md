@@ -62,9 +62,9 @@ The exact JSON contract is documented in [VOICEVOX_TEMPLATE_CONTRACT.md](./VOICE
 The current preferred contract is `version = 2` with persona-like sections:
 
 - `identity`
-  - project name, reading, default callname
+  - project name, contiguous katakana reading, default callname
 - `defaults`
-  - speaker/style/voice metadata shared by the project
+  - speaker/style/speed/voice metadata shared by the project
 - `tool_readings`
   - `claude` / `codex` readings for spoken notifications
 - `events`
@@ -87,6 +87,11 @@ The helper supports:
   - `{project_name}`
 - `speaker_id` directly, or `speaker` + `style` name resolution through
   `VOICEVOX ENGINE`
+- `speed_scale` to make short notification lines read faster
+
+For `project_reading`, prefer a single uninterrupted katakana string such as
+`シーシーステータスバー` rather than `シーシー ステータス バー` so the line is
+spoken in one flow.
 
 Legacy `version = 1` files still work, but new project files should use the
 `version = 2` contract.
