@@ -32,9 +32,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Run setup check (handles first run, app move, repair)
         SetupManager.shared.checkAndRunSetup()
 
-        // Assign default alert sound for first-time users only.
-        AppSettings.initializeDefaultAlertSoundIfNeeded()
-
         // Initialize notification manager and request permission
         if AppSettings.notificationsEnabled {
             NotificationManager.shared.requestPermission()
@@ -447,10 +444,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifyItem.state = AppSettings.notificationsEnabled ? .on : .off
         menu.addItem(notifyItem)
 
-        // Sound Alerts (submenu)
-        let soundItem = NSMenuItem(title: "Sound Alerts", action: nil, keyEquivalent: "")
-        soundItem.submenu = createSoundAlertsMenu()
-        menu.addItem(soundItem)
+        // Alert Command (submenu)
+        let alertCommandItem = NSMenuItem(title: "Alert Command", action: nil, keyEquivalent: "")
+        alertCommandItem.submenu = createAlertCommandMenu()
+        menu.addItem(alertCommandItem)
 
         // Autofocus
         let autofocusItem = NSMenuItem(
@@ -701,103 +698,129 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func createSoundAlertsMenu() -> NSMenu {
+    private func alertCommandSummaryTitle() -> String {
+        guard let command = AppSettings.alertCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty else {
+            return "Not Configured"
+        }
+
+        if command.count <= 60 {
+            return command
+        }
+
+        return String(command.prefix(57)) + "..."
+    }
+
+    private func createAlertCommandMenu() -> NSMenu {
         let menu = NSMenu()
 
-        // Enabled toggle
         let enabledItem = NSMenuItem(
             title: "Enabled",
-            action: #selector(toggleSoundAlerts(_:)),
+            action: #selector(toggleAlertCommand(_:)),
             keyEquivalent: ""
         )
         enabledItem.target = self
-        enabledItem.state = AppSettings.soundEnabled ? .on : .off
+        enabledItem.state = AppSettings.isAlertCommandEnabled ? .on : .off
         menu.addItem(enabledItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        let currentPath = AppSettings.alertSoundPath
-        let isBeep = (currentPath == "beep")
-        let isCustom = currentPath != nil && currentPath != "beep" && currentPath != ""
-
-        // System Beep
-        let beepItem = NSMenuItem(
-            title: "System Beep",
-            action: #selector(selectSystemBeep(_:)),
+        let currentCommandItem = NSMenuItem(
+            title: alertCommandSummaryTitle(),
+            action: nil,
             keyEquivalent: ""
         )
-        beepItem.target = self
-        beepItem.state = isBeep ? .on : .off
-        menu.addItem(beepItem)
+        currentCommandItem.isEnabled = false
+        menu.addItem(currentCommandItem)
 
-        // Custom file / Choose File
-        let customTitle = isCustom
-            ? URL(fileURLWithPath: currentPath!).lastPathComponent
-            : "Choose File..."
-        let customItem = NSMenuItem(
-            title: customTitle,
-            action: #selector(selectCustomSound(_:)),
+        let editItem = NSMenuItem(
+            title: "Edit Command...",
+            action: #selector(editAlertCommand(_:)),
             keyEquivalent: ""
         )
-        customItem.target = self
-        customItem.state = isCustom ? .on : .off
-        menu.addItem(customItem)
+        editItem.target = self
+        menu.addItem(editItem)
 
-        menu.addItem(NSMenuItem.separator())
-
-        // Preview
-        let previewItem = NSMenuItem(
-            title: "Preview",
-            action: #selector(previewAlertSound(_:)),
+        let clearItem = NSMenuItem(
+            title: "Clear Command",
+            action: #selector(clearAlertCommand(_:)),
             keyEquivalent: ""
         )
-        previewItem.target = self
-        menu.addItem(previewItem)
+        clearItem.target = self
+        clearItem.isEnabled = AppSettings.isAlertCommandConfigured
+        menu.addItem(clearItem)
 
         return menu
     }
 
-    @MainActor @objc private func toggleSoundAlerts(_ sender: NSMenuItem) {
-        let newState = !AppSettings.soundEnabled
-        AppSettings.soundEnabled = newState
+    @MainActor @objc private func toggleAlertCommand(_ sender: NSMenuItem) {
+        let newState = !AppSettings.isAlertCommandEnabled
+        if newState && !AppSettings.isAlertCommandConfigured {
+            AppSettings.alertsEnabled = false
+            sender.state = .off
+            showAlert(
+                title: "Alert Command Not Configured",
+                message: "Set a command first in Alert Command > Edit Command..."
+            )
+            return
+        }
+
+        AppSettings.alertsEnabled = newState
         sender.state = newState ? .on : .off
-        DebugLog.log("[AppDelegate] Sound alerts \(newState ? "enabled" : "disabled")")
-        if newState {
-            SoundPlayer.previewSound()
+        DebugLog.log("[AppDelegate] Alert command \(newState ? "enabled" : "disabled")")
+        refreshUI()
+    }
+
+    @MainActor @objc private func editAlertCommand(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Edit Alert Command"
+        alert.informativeText = """
+Command runs with /bin/zsh -lc.
+
+Available variables:
+$CCSB_SOURCE
+$CCSB_SESSION_ID
+$CCSB_PROJECT
+$CCSB_DISPLAY_NAME
+$CCSB_CWD
+$CCSB_TTY
+$CCSB_WAITING_REASON
+$CCSB_TERMINAL
+$CCSB_TMUX_SESSION
+$CCSB_TMUX_WINDOW_INDEX
+$CCSB_TMUX_WINDOW_NAME
+$CCSB_TMUX_PANE_INDEX
+$CCSB_TMUX_PANE_TARGET
+"""
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 460, height: 24))
+        textField.stringValue = AppSettings.alertCommand ?? ""
+        textField.placeholderString = "terminal-notifier -message \"$CCSB_PROJECT $CCSB_TMUX_PANE_TARGET\""
+        alert.accessoryView = textField
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        let command = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if command.isEmpty {
+            AppSettings.alertCommand = nil
+            AppSettings.alertsEnabled = false
+            DebugLog.log("[AppDelegate] Cleared alert command from editor")
+        } else {
+            AppSettings.alertCommand = command
+            DebugLog.log("[AppDelegate] Alert command updated")
         }
         refreshUI()
     }
 
-    @MainActor @objc private func selectSystemBeep(_ sender: NSMenuItem) {
-        AppSettings.alertSoundPath = "beep"
-        DebugLog.log("[AppDelegate] Alert sound set to system beep")
-        SoundPlayer.previewSound()
+    @MainActor @objc private func clearAlertCommand(_ sender: NSMenuItem) {
+        AppSettings.alertCommand = nil
+        AppSettings.alertsEnabled = false
+        DebugLog.log("[AppDelegate] Alert command cleared")
         refreshUI()
-    }
-
-    @MainActor @objc private func selectCustomSound(_ sender: NSMenuItem) {
-        let panel = NSOpenPanel()
-        panel.title = "Choose Alert Sound"
-        panel.allowedContentTypes = [
-            .audio,
-            .init(filenameExtension: "aiff")!,
-            .init(filenameExtension: "wav")!,
-            .init(filenameExtension: "mp3")!,
-        ]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        if panel.runModal() == .OK, let url = panel.url {
-            AppSettings.alertSoundPath = url.path
-            DebugLog.log("[AppDelegate] Alert sound set to: \(url.path)")
-            // Preview the selected sound
-            SoundPlayer.previewSound()
-            refreshUI()
-        }
-    }
-
-    @objc private func previewAlertSound(_ sender: NSMenuItem) {
-        SoundPlayer.previewSound()
     }
 
     @objc private func toggleAutofocus(_ sender: NSMenuItem) {

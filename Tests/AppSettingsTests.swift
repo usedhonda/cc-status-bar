@@ -10,6 +10,8 @@ final class AppSettingsTests: XCTestCase {
     private var originalColorTheme: String?
     private var originalTimeout: Int?
     private var originalAlertSoundPath: String?
+    private var originalAlertsEnabled: Bool?
+    private var originalAlertCommand: String?
 
     override func setUp() {
         super.setUp()
@@ -17,6 +19,8 @@ final class AppSettingsTests: XCTestCase {
         originalColorTheme = defaults.string(forKey: "colorTheme")
         originalTimeout = defaults.object(forKey: "sessionTimeoutMinutes") as? Int
         originalAlertSoundPath = defaults.string(forKey: "alertSoundPath")
+        originalAlertsEnabled = defaults.object(forKey: "alertsEnabled") as? Bool
+        originalAlertCommand = defaults.string(forKey: "alertCommand")
     }
 
     override func tearDown() {
@@ -37,6 +41,18 @@ final class AppSettingsTests: XCTestCase {
             defaults.set(original, forKey: "alertSoundPath")
         } else {
             defaults.removeObject(forKey: "alertSoundPath")
+        }
+
+        if let original = originalAlertsEnabled {
+            defaults.set(original, forKey: "alertsEnabled")
+        } else {
+            defaults.removeObject(forKey: "alertsEnabled")
+        }
+
+        if let original = originalAlertCommand {
+            defaults.set(original, forKey: "alertCommand")
+        } else {
+            defaults.removeObject(forKey: "alertCommand")
         }
 
         super.tearDown()
@@ -123,5 +139,33 @@ final class AppSettingsTests: XCTestCase {
         AppSettings.initializeDefaultAlertSoundIfNeeded(fileExists: { _ in true })
 
         XCTAssertEqual(AppSettings.alertSoundPath, AppSettings.defaultAlertSoundPath)
+    }
+
+    // MARK: - Alert Command Tests
+
+    func testAlertsEnabledDefaultsToFalse() {
+        defaults.removeObject(forKey: "alertsEnabled")
+        XCTAssertFalse(AppSettings.alertsEnabled)
+    }
+
+    func testAlertCommandSetAndGet() {
+        AppSettings.alertCommand = "echo hello"
+        XCTAssertEqual(AppSettings.alertCommand, "echo hello")
+        XCTAssertTrue(AppSettings.isAlertCommandConfigured)
+    }
+
+    func testEmptyAlertCommandIsTreatedAsUnconfigured() {
+        AppSettings.alertCommand = "   "
+        XCTAssertFalse(AppSettings.isAlertCommandConfigured)
+        XCTAssertFalse(AppSettings.isAlertCommandEnabled)
+    }
+
+    func testAlertCommandEnabledRequiresCommand() {
+        AppSettings.alertsEnabled = true
+        AppSettings.alertCommand = nil
+        XCTAssertFalse(AppSettings.isAlertCommandEnabled)
+
+        AppSettings.alertCommand = "echo ready"
+        XCTAssertTrue(AppSettings.isAlertCommandEnabled)
     }
 }

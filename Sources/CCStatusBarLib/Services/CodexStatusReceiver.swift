@@ -100,7 +100,7 @@ final class CodexStatusReceiver: ObservableObject {
         DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd) reason=\(waitingReason.rawValue)")
 
         // Play sound and send BEL for Codex waiting transition
-        SoundPlayer.playAlertSound()
+        SoundPlayer.runAlertCommand(for: codexSession ?? CodexSession(pid: 0, cwd: cwd), waitingReason: waitingReason)
         if let codexSession = codexSession, let tty = codexSession.tty {
             SoundPlayer.sendBell(tty: tty)
         }

@@ -31,6 +31,8 @@ enum AppSettings {
         static let autofocusEnabled = "autofocusEnabled"
         static let soundEnabled = "soundEnabled"
         static let alertSoundPath = "alertSoundPath"
+        static let alertsEnabled = "alertsEnabled"
+        static let alertCommand = "alertCommand"
     }
 
     /// Bundle ID for shared UserDefaults access (CLI and GUI)
@@ -181,5 +183,31 @@ enum AppSettings {
             return SessionDisplayMode(rawValue: raw) ?? .projectName
         }
         set { defaults.set(newValue.rawValue, forKey: Keys.sessionDisplayMode) }
+    }
+
+    static var alertsEnabled: Bool {
+        get {
+            if defaults.object(forKey: Keys.alertsEnabled) == nil {
+                return false
+            }
+            return defaults.bool(forKey: Keys.alertsEnabled)
+        }
+        set { defaults.set(newValue, forKey: Keys.alertsEnabled) }
+    }
+
+    static var alertCommand: String? {
+        get { defaults.string(forKey: Keys.alertCommand) }
+        set { defaults.set(newValue, forKey: Keys.alertCommand) }
+    }
+
+    static var isAlertCommandConfigured: Bool {
+        guard let command = alertCommand?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !command.isEmpty
+    }
+
+    static var isAlertCommandEnabled: Bool {
+        alertsEnabled && isAlertCommandConfigured
     }
 }
