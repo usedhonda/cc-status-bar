@@ -42,9 +42,5 @@ secrets/
 
 AGENTS.md
 
-# Machine-local VOICEVOX helpers
-docs/VOICEVOX.md
-docs/VOICEVOX_TEMPLATE_CONTRACT.md
+# Machine-local VOICEVOX installer
 scripts/install-voicevox-engine.sh
-scripts/voicevox-alert.sh
-scripts/test-voicevox-alert.sh
