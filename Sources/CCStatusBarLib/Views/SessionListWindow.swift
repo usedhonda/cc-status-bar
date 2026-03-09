@@ -742,7 +742,7 @@ struct PinnedCodexSessionRowView: View {
 
     private func focusCodexSession() {
         guard status != .stopped, codexSession.pid > 0 else {
-            DebugLog.log("[SessionListWindow] Skip focus for synthetic stopped Codex session: \(codexSession.cwd)")
+            DebugLog.log("[SessionListWindow] Skip focus for non-focusable Codex session: \(codexSession.cwd) status=\(status.rawValue) pid=\(codexSession.pid)")
             return
         }
         CodexFocusHelper.focus(session: codexSession)

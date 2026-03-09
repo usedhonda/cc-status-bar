@@ -2,10 +2,34 @@ import XCTest
 @testable import CCStatusBarLib
 
 final class CodexStatusReceiverTests: XCTestCase {
+    private let defaults = AppSettings.userDefaultsStore
+    private var originalAlertsEnabled: Bool?
+    private var originalAlertCommand: String?
+
     @MainActor
     override func setUp() {
         super.setUp()
         CodexStatusReceiver.shared.clearAll()
+        originalAlertsEnabled = defaults.object(forKey: "alertsEnabled") as? Bool
+        originalAlertCommand = defaults.string(forKey: "alertCommand")
+        defaults.set(false, forKey: "alertsEnabled")
+        defaults.removeObject(forKey: "alertCommand")
+    }
+
+    override func tearDown() {
+        if let originalAlertsEnabled {
+            defaults.set(originalAlertsEnabled, forKey: "alertsEnabled")
+        } else {
+            defaults.removeObject(forKey: "alertsEnabled")
+        }
+
+        if let originalAlertCommand {
+            defaults.set(originalAlertCommand, forKey: "alertCommand")
+        } else {
+            defaults.removeObject(forKey: "alertCommand")
+        }
+
+        super.tearDown()
     }
 
     @MainActor
@@ -91,6 +115,74 @@ final class CodexStatusReceiverTests: XCTestCase {
     }
 
     @MainActor
+    func testInferWaitingReasonDetectsQuestionPromptAsYellow() {
+        let paneCapture = """
+        Question 1/1 (1 unanswered)
+        1. Start now
+        2. Later
+
+        tab to add notes
+        enter to submit answer
+        """
+        let reason = CodexStatusReceiver.inferWaitingReason(
+            from: ["type": "agent-turn-complete"],
+            paneCapture: paneCapture
+        )
+        XCTAssertEqual(reason, .stop)
+        XCTAssertTrue(CodexStatusReceiver.isLikelyWaitingScreen(paneCapture, waitingReason: .stop))
+    }
+
+    @MainActor
+    func testShouldNotRecoverWhileQuestionPromptIsStillVisible() {
+        let previousCapture = """
+        Question 1/1 (1 unanswered)
+        1. Start now
+        2. Later
+
+        enter to submit answer
+        """
+        let currentCapture = """
+        Question 1/1 (1 unanswered)
+        > 1. Start now
+        2. Later
+
+        tab to add notes
+        enter to submit answer
+        """
+
+        XCTAssertFalse(
+            CodexStatusReceiver.shouldRecoverToRunning(
+                previousPaneHash: CodexStatusReceiver.hashPaneTail(previousCapture),
+                currentPaneCapture: currentCapture,
+                waitingReason: .stop
+            )
+        )
+    }
+
+    @MainActor
+    func testShouldRecoverAfterQuestionMarkersDisappear() {
+        let previousCapture = """
+        Question 1/1 (1 unanswered)
+        1. Start now
+        2. Later
+
+        enter to submit answer
+        """
+        let currentCapture = """
+        Applied startup migration.
+        Continuing with implementation...
+        """
+
+        XCTAssertTrue(
+            CodexStatusReceiver.shouldRecoverToRunning(
+                previousPaneHash: CodexStatusReceiver.hashPaneTail(previousCapture),
+                currentPaneCapture: currentCapture,
+                waitingReason: .stop
+            )
+        )
+    }
+
+    @MainActor
     func testReconcileMarksMissingSessionAsStoppedAfterGrace() {
         let receiver = CodexStatusReceiver.shared
         let cwd = "/tmp/codex-grace"
@@ -138,5 +230,26 @@ final class CodexStatusReceiverTests: XCTestCase {
         XCTAssertNotNil(synthetic)
         XCTAssertEqual(synthetic?.pid, 0)
         XCTAssertEqual(receiver.getStatus(for: cwd), .stopped)
+    }
+
+    @MainActor
+    func testWithSyntheticStoppedSessionsAddsWaitingPlaceholder() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-waiting-placeholder"
+        let event: [String: Any] = [
+            "type": "agent-turn-complete",
+            "cwd": cwd,
+            "thread-id": "thread-123"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+
+        receiver.handleEvent(data)
+
+        let sessions = receiver.withSyntheticStoppedSessions(activeSessions: [])
+        let synthetic = sessions.first(where: { $0.cwd == cwd })
+        XCTAssertNotNil(synthetic)
+        XCTAssertEqual(synthetic?.pid, 0)
+        XCTAssertEqual(receiver.getStatus(for: cwd), .waitingInput)
+        XCTAssertEqual(receiver.getWaitingReason(for: cwd), .stop)
     }
 }

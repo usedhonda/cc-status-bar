@@ -1156,7 +1156,7 @@ $CCSB_TMUX_PANE_TARGET
         guard let codexSession = sender.representedObject as? CodexSession else { return }
         let status = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
         guard status != .stopped, codexSession.pid > 0 else {
-            DebugLog.log("[AppDelegate] Skip focus for synthetic stopped Codex session: \(codexSession.cwd)")
+            DebugLog.log("[AppDelegate] Skip focus for non-focusable Codex session: \(codexSession.cwd) status=\(status.rawValue) pid=\(codexSession.pid)")
             return
         }
         CodexFocusHelper.focus(session: codexSession)

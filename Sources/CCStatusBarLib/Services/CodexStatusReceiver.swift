@@ -34,7 +34,7 @@ final class CodexStatusReceiver: ObservableObject {
     private var statusByCwd: [String: CodexSessionStatus] = [:]
     /// cwds that have been acknowledged by user (click/focus)
     private var acknowledgedCwds: Set<String> = []
-    /// cwd -> hash of pane content at last agent-turn-complete (for detecting running recovery)
+    /// cwd -> hash of pane content at last observed waiting screen
     private var lastPaneCapture: [String: Int] = [:]
     /// cwd -> last alert command fire time (throttle rapid-fire from Codex)
     private var lastAlertTime: [String: Date] = [:]
@@ -79,7 +79,8 @@ final class CodexStatusReceiver: ObservableObject {
         let now = Date()
         let codexSession = CodexObserver.getCodexSession(for: cwd)
         let paneCapture = capturePane(for: codexSession)
-        let waitingReason = Self.inferWaitingReason(from: json, paneCapture: paneCapture)
+        let waitingDetection = Self.detectWaitingInput(from: json, paneCapture: paneCapture)
+        let waitingReason = waitingDetection.reason
 
         statusByCwd[cwd] = CodexSessionStatus(
             status: .waitingInput,
@@ -99,9 +100,11 @@ final class CodexStatusReceiver: ObservableObject {
         // Save pane capture hash for later comparison (running recovery detection)
         if let paneCapture = paneCapture {
             lastPaneCapture[cwd] = Self.hashPaneTail(paneCapture)
+        } else {
+            lastPaneCapture.removeValue(forKey: cwd)
         }
 
-        DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd) reason=\(waitingReason.rawValue)")
+        DebugLog.log("[CodexStatusReceiver] Codex waiting_input: \(cwd) reason=\(waitingReason.rawValue) source=\(waitingDetection.source)")
 
         // Run alert command for Codex waiting transition (throttled per cwd).
         if let lastFire = lastAlertTime[cwd], now.timeIntervalSince(lastFire) < alertCooldown {
@@ -209,18 +212,25 @@ final class CodexStatusReceiver: ObservableObject {
                     AutofocusManager.shared.clearCooldown(sessionId: codexId)
                     lastAlertTime.removeValue(forKey: cwd)
                 } else if tracked.status == .waitingInput {
-                    // Detect running recovery by comparing pane content
+                    // Recover only after the waiting markers disappear. Simple hash changes
+                    // are not enough because moving selection inside a question prompt
+                    // should stay yellow.
                     if let session = activeSessions.first(where: { $0.cwd == cwd }),
-                       let currentCapture = capturePane(for: session),
-                       let savedHash = lastPaneCapture[cwd] {
+                       let currentCapture = capturePane(for: session) {
                         let currentHash = Self.hashPaneTail(currentCapture)
-                        if currentHash != savedHash {
+                        if Self.isLikelyWaitingScreen(currentCapture, waitingReason: tracked.waitingReason) {
+                            lastPaneCapture[cwd] = currentHash
+                        } else if Self.shouldRecoverToRunning(
+                            previousPaneHash: lastPaneCapture[cwd],
+                            currentPaneCapture: currentCapture,
+                            waitingReason: tracked.waitingReason
+                        ) {
                             tracked.status = .running
                             tracked.waitingReason = nil
                             tracked.lastEventAt = now
                             lastPaneCapture.removeValue(forKey: cwd)
                             acknowledgedCwds.remove(cwd)
-                            DebugLog.log("[CodexStatusReceiver] Pane changed, recovering to running: \(cwd)")
+                            DebugLog.log("[CodexStatusReceiver] Waiting markers disappeared, recovering to running: \(cwd)")
 
                             // Invalidate CodexObserver cache to trigger WebSocket update
                             CodexObserver.invalidateCache()
@@ -259,13 +269,13 @@ final class CodexStatusReceiver: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Return active sessions augmented with synthetic stopped placeholders.
+    /// Return active sessions augmented with synthetic placeholders for tracked waiting/stopped states.
     func withSyntheticStoppedSessions(activeSessions: [CodexSession], now: Date = Date()) -> [CodexSession] {
         reconcileActiveSessions(activeSessions, now: now)
 
         var result = activeSessions
         let activeCwds = Set(activeSessions.map(\.cwd))
-        for (cwd, tracked) in statusByCwd where tracked.status == .stopped && !activeCwds.contains(cwd) {
+        for (cwd, tracked) in statusByCwd where tracked.status != .running && !activeCwds.contains(cwd) {
             var synthetic = CodexSession(pid: 0, cwd: cwd)
             synthetic.terminalApp = "Codex"
             synthetic.sessionId = tracked.threadId
@@ -303,18 +313,47 @@ final class CodexStatusReceiver: ObservableObject {
     /// Infer waiting reason from raw Codex notify payload.
     /// Default is yellow (stop). Red is allowed only for high-confidence signals.
     static func inferWaitingReason(from json: [String: Any], paneCapture: String? = nil) -> CodexWaitingReason {
+        detectWaitingInput(from: json, paneCapture: paneCapture).reason
+    }
+
+    static func detectWaitingInput(from json: [String: Any], paneCapture: String? = nil) -> (reason: CodexWaitingReason, source: String) {
         if let type = (json["notification_type"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased(),
            type == "permission_prompt" {
-            return .permissionPrompt
+            return (.permissionPrompt, "notify")
         }
 
         if CodexRedSignalDetector.isHighConfidencePermissionPrompt(paneCapture: paneCapture) {
-            return .permissionPrompt
+            return (.permissionPrompt, "pane_permission_prompt")
         }
 
-        return .stop
+        if CodexQuestionSignalDetector.isHighConfidenceQuestionPrompt(paneCapture: paneCapture) {
+            return (.stop, "pane_question_prompt")
+        }
+
+        return (.stop, "default")
+    }
+
+    static func isLikelyWaitingScreen(_ paneCapture: String?, waitingReason: CodexWaitingReason?) -> Bool {
+        guard let paneCapture, !paneCapture.isEmpty else { return false }
+        if waitingReason == .permissionPrompt {
+            return CodexRedSignalDetector.isHighConfidencePermissionPrompt(paneCapture: paneCapture)
+        }
+        return CodexQuestionSignalDetector.isHighConfidenceQuestionPrompt(paneCapture: paneCapture)
+            || CodexRedSignalDetector.isHighConfidencePermissionPrompt(paneCapture: paneCapture)
+    }
+
+    static func shouldRecoverToRunning(
+        previousPaneHash: Int?,
+        currentPaneCapture: String,
+        waitingReason: CodexWaitingReason?
+    ) -> Bool {
+        guard let previousPaneHash else { return false }
+        guard !isLikelyWaitingScreen(currentPaneCapture, waitingReason: waitingReason) else {
+            return false
+        }
+        return hashPaneTail(currentPaneCapture) != previousPaneHash
     }
 
     /// Hash the last N lines of pane output for comparison
@@ -350,6 +389,26 @@ private enum CodexRedSignalDetector {
         let hasYesOption = normalized.contains("1. yes, implement this")
         let hasNoOption = normalized.contains("2. no, stay in plan mode")
         return hasPrompt && hasYesOption && hasNoOption
+    }
+}
+
+private enum CodexQuestionSignalDetector {
+    private static let questionCounterRegex = try! NSRegularExpression(pattern: #"question\s+\d+\s*/\s*\d+"#)
+
+    static func isHighConfidenceQuestionPrompt(paneCapture: String?) -> Bool {
+        guard let paneCapture, !paneCapture.isEmpty else { return false }
+        let normalized = paneCapture
+            .lowercased()
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        let hasQuestionCounter = questionCounterRegex.firstMatch(in: normalized, options: [], range: range) != nil
+        let hasSubmitHint = normalized.contains("enter to submit answer")
+        let hasUnanswered = normalized.contains("unanswered")
+        let hasNotesHint = normalized.contains("tab to add notes")
+
+        return hasQuestionCounter && (hasSubmitHint || hasUnanswered || hasNotesHint)
     }
 }
 
