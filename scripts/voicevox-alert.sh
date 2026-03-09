@@ -450,6 +450,35 @@ expand_template_text() {
   printf '%s\n' "$template_text"
 }
 
+ensure_contextualized_text() {
+  local text="$1"
+  local project_spoken="$2"
+  local tool_reading="$3"
+  local reason="$4"
+
+  if [ -z "$project_spoken" ] || [ -z "$tool_reading" ]; then
+    printf '%s\n' "$text"
+    return 0
+  fi
+
+  if [ -n "$project_spoken" ] && [ -n "$tool_reading" ] && [[ "$text" == *"$project_spoken"* ]] && [[ "$text" == *"$tool_reading"* ]]; then
+    printf '%s\n' "$text"
+    return 0
+  fi
+
+  case "$reason" in
+    stop)
+      printf '%s\n' "${project_spoken}の${tool_reading}、とまってます。"
+      ;;
+    permission_prompt)
+      printf '%s\n' "${project_spoken}の${tool_reading}、きょかまちです。"
+      ;;
+    *)
+      printf '%s\n' "${project_spoken}の${tool_reading}、まってます。"
+      ;;
+  esac
+}
+
 run_voicevox() {
   local base_url="$1"
   local speaker="$2"
@@ -591,6 +620,7 @@ main() {
   local text
   text="$(expand_template_text "$raw_text" "$project_reading" "$tool_reading" "$voice_gender" "$callname" "$display_spoken" "$project_name_spoken")"
   text="$(spokenify_ascii_spans "$text")"
+  text="$(ensure_contextualized_text "$text" "$project_reading" "$tool_reading" "$waiting_reason")"
   if [ -z "$text" ]; then
     play_fallback_sound
     exit 0

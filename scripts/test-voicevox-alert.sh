@@ -460,6 +460,77 @@ EOF
   assert_file_not_contains_regex "$curl_log" 'text=.*[A-Za-z]'
 }
 
+test_templates_missing_project_context_are_rewritten() {
+  local fixture_dir="$tmp_dir/contextualize"
+  local project_root="$fixture_dir/project"
+  local app_support_dir="$fixture_dir/app-support"
+  local stub_dir="$fixture_dir/stubs"
+  local debug_log="$fixture_dir/debug.log"
+  local curl_log="$fixture_dir/curl.log"
+  local afplay_log="$fixture_dir/afplay.log"
+
+  mkdir -p "$project_root" "$app_support_dir"
+  setup_stubs "$stub_dir"
+
+  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+{
+  "version": 2,
+  "identity": {
+    "project_name": "cc-status-bar",
+    "project_spoken": "シーシーステータスバー",
+    "alias_spoken": "シーシーエスビー",
+    "callname": "ごしゅじんさま"
+  },
+  "defaults": {
+    "speaker": "四国めたん",
+    "style": "ノーマル",
+    "speed_scale": 1.20,
+    "voice_gender": "female",
+    "callname": "ごしゅじんさま"
+  },
+  "tool_readings": {
+    "claude": "クロード",
+    "codex": "コーデックス"
+  },
+  "events": {
+    "default": [
+      {
+        "id": "broken-01",
+        "tool": "codex",
+        "text": "{callname}、{tool_reading}、まってます。"
+      }
+    ]
+  }
+}
+EOF
+
+  cat > "$app_support_dir/voicevox-runtime.json" <<'EOF'
+{
+  "engine_base_url": "http://127.0.0.1:50021",
+  "default_speaker": 42
+}
+EOF
+
+  : > "$debug_log"
+  : > "$curl_log"
+  : > "$afplay_log"
+
+  PATH="$stub_dir:$PATH" \
+  CCSB_CWD="$project_root" \
+  CCSB_WAITING_REASON="unknown" \
+  CCSB_SOURCE="codex" \
+  CCSB_DISPLAY_NAME="ccsb" \
+  CCSB_PROJECT="cc-status-bar" \
+  CCSB_APP_SUPPORT_DIR="$app_support_dir" \
+  CCSB_VOICEVOX_DEBUG_LOG="$debug_log" \
+  VOICEVOX_TEST_CURL_LOG="$curl_log" \
+  VOICEVOX_TEST_AFPLAY_LOG="$afplay_log" \
+  "$VOICEVOX_SCRIPT"
+
+  assert_file_contains "$curl_log" "text=シーシーエスビーのコーデックス、まってます。"
+  assert_file_not_contains_regex "$curl_log" 'text=.*[A-Za-z]'
+}
+
 test_missing_project_file_falls_back_without_calling_voicevox() {
   local fixture_dir="$tmp_dir/missing-project-file"
   local project_root="$fixture_dir/project"
@@ -513,6 +584,7 @@ test_uses_runtime_default_speaker_when_project_file_does_not_define_one
 test_v2_templates_expand_placeholders_and_filter_by_tool
 test_alias_spoken_takes_priority_and_ascii_is_removed
 test_runtime_ascii_project_names_are_spokenified
+test_templates_missing_project_context_are_rewritten
 test_missing_project_file_falls_back_without_calling_voicevox
 test_invalid_json_falls_back_to_ping
 
