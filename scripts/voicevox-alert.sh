@@ -204,26 +204,179 @@ default_field_or_empty() {
   jq -r --arg field "$field" '.defaults[$field] // empty' "$voice_file" 2>/dev/null || true
 }
 
-resolve_project_reading() {
+voice_letter_spoken() {
+  case "$1" in
+    a) printf 'エー\n' ;;
+    b) printf 'ビー\n' ;;
+    c) printf 'シー\n' ;;
+    d) printf 'ディー\n' ;;
+    e) printf 'イー\n' ;;
+    f) printf 'エフ\n' ;;
+    g) printf 'ジー\n' ;;
+    h) printf 'エイチ\n' ;;
+    i) printf 'アイ\n' ;;
+    j) printf 'ジェー\n' ;;
+    k) printf 'ケー\n' ;;
+    l) printf 'エル\n' ;;
+    m) printf 'エム\n' ;;
+    n) printf 'エヌ\n' ;;
+    o) printf 'オー\n' ;;
+    p) printf 'ピー\n' ;;
+    q) printf 'キュー\n' ;;
+    r) printf 'アール\n' ;;
+    s) printf 'エス\n' ;;
+    t) printf 'ティー\n' ;;
+    u) printf 'ユー\n' ;;
+    v) printf 'ブイ\n' ;;
+    w) printf 'ダブリュー\n' ;;
+    x) printf 'エックス\n' ;;
+    y) printf 'ワイ\n' ;;
+    z) printf 'ズィー\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+voice_known_token_spoken() {
+  case "$1" in
+    ana) printf 'エーエヌエー\n' ;;
+    ai) printf 'エーアイ\n' ;;
+    oc) printf 'オーシー\n' ;;
+    cc) printf 'シーシー\n' ;;
+    ccsb) printf 'シーシーエスビー\n' ;;
+    cab) printf 'シーエービー\n' ;;
+    status) printf 'ステータス\n' ;;
+    bar) printf 'バー\n' ;;
+    line) printf 'ライン\n' ;;
+    statusline) printf 'ステータスライン\n' ;;
+    general) printf 'ジェネラル\n' ;;
+    chrome) printf 'クローム\n' ;;
+    bridge) printf 'ブリッジ\n' ;;
+    tproj) printf 'ティープロジェイ\n' ;;
+    ext) printf 'エクスト\n' ;;
+    recall) printf 'リコール\n' ;;
+    clawgate) printf 'クロウゲート\n' ;;
+    claw) printf 'クロウ\n' ;;
+    gate) printf 'ゲート\n' ;;
+    vibeterm) printf 'バイブターム\n' ;;
+    vibe) printf 'バイブ\n' ;;
+    term) printf 'ターム\n' ;;
+    ailio) printf 'アイリオ\n' ;;
+    codex) printf 'コーデックス\n' ;;
+    claude) printf 'クロード\n' ;;
+    voicevox) printf 'ボイスボックス\n' ;;
+    ios) printf 'アイオーエス\n' ;;
+    mac) printf 'マック\n' ;;
+    cli) printf 'シーエルアイ\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+voice_alpha_token_spoken() {
+  local token="$1"
+  local lowered=""
+  local out=""
+  local ch
+
+  lowered="$(printf '%s\n' "$token" | tr '[:upper:]' '[:lower:]')"
+
+  if out="$(voice_known_token_spoken "$lowered" 2>/dev/null)"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  if [[ "$lowered" =~ ^[a-z]+$ ]]; then
+    out=""
+    while [ -n "$lowered" ]; do
+      ch="${lowered:0:1}"
+      lowered="${lowered:1}"
+      out="${out}$(voice_letter_spoken "$ch")"
+    done
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  return 1
+}
+
+spokenify_ascii_token_string() {
+  local raw="$1"
+  local lowered sanitized token reading out=""
+
+  lowered="$(printf '%s\n' "$raw" | tr '[:upper:]' '[:lower:]')"
+  sanitized="$(printf '%s\n' "$lowered" | sed -E 's/[^a-z0-9]+/ /g')"
+  for token in $sanitized; do
+    if reading="$(voice_alpha_token_spoken "$token" 2>/dev/null)"; then
+      :
+    else
+      reading="$token"
+    fi
+    out="${out}${reading}"
+  done
+  printf '%s\n' "$out"
+}
+
+spokenify_ascii_spans() {
+  local text="$1"
+  local token spoken prefix out=""
+
+  while [[ "$text" =~ ([A-Za-z][A-Za-z0-9_-]*) ]]; do
+    token="${BASH_REMATCH[1]}"
+    prefix="${text%%"$token"*}"
+    spoken="$(spokenify_ascii_token_string "$token")"
+    out="${out}${prefix}${spoken}"
+    text="${text#*"$token"}"
+  done
+  printf '%s\n' "${out}${text}"
+}
+
+contains_ascii_letters() {
+  local text="$1"
+  LC_ALL=C grep -q '[A-Za-z]' <<<"$text"
+}
+
+resolve_project_spoken() {
   local voice_file="$1"
   local display_name="$2"
   local project_name="$3"
-  local reading=""
-  reading="$(json_value_or_empty "$voice_file" '.identity.project_reading')"
-  if [ -n "$reading" ]; then
-    printf '%s\n' "$reading"
+  local spoken=""
+
+  spoken="$(json_value_or_empty "$voice_file" '.identity.alias_spoken')"
+  if [ -n "$spoken" ]; then
+    spoken="$(spokenify_ascii_spans "$spoken")"
+    printf '%s\n' "$spoken"
     return 0
   fi
-  reading="$(json_value_or_empty "$voice_file" '.identity.project_name')"
-  if [ -n "$reading" ]; then
-    printf '%s\n' "$reading"
-    return 0
-  fi
+
   if [ -n "$display_name" ]; then
-    printf '%s\n' "$display_name"
+    spoken="$(spokenify_ascii_spans "$display_name")"
+    if [ -n "$spoken" ]; then
+      printf '%s\n' "$spoken"
+      return 0
+    fi
+  fi
+
+  spoken="$(json_value_or_empty "$voice_file" '.identity.project_spoken')"
+  if [ -n "$spoken" ]; then
+    spoken="$(spokenify_ascii_spans "$spoken")"
+    printf '%s\n' "$spoken"
     return 0
   fi
-  printf '%s\n' "$project_name"
+
+  spoken="$(json_value_or_empty "$voice_file" '.identity.project_reading')"
+  if [ -n "$spoken" ]; then
+    spoken="$(spokenify_ascii_spans "$spoken")"
+    printf '%s\n' "$spoken"
+    return 0
+  fi
+
+  spoken="$(json_value_or_empty "$voice_file" '.identity.project_name')"
+  if [ -n "$spoken" ]; then
+    spoken="$(spokenify_ascii_spans "$spoken")"
+    printf '%s\n' "$spoken"
+    return 0
+  fi
+
+  printf '%s\n' "$(spokenify_ascii_spans "$project_name")"
 }
 
 resolve_tool_reading() {
@@ -281,19 +434,19 @@ resolve_speaker_id_from_names() {
 
 expand_template_text() {
   local template_text="$1"
-  local project_reading="$2"
+  local project_spoken="$2"
   local tool_reading="$3"
   local voice_gender="$4"
   local callname="$5"
-  local display_name="$6"
-  local project_name="$7"
+  local display_spoken="$6"
+  local project_name_spoken="$7"
 
-  template_text="${template_text//\{project_reading\}/$project_reading}"
+  template_text="${template_text//\{project_reading\}/$project_spoken}"
   template_text="${template_text//\{tool_reading\}/$tool_reading}"
   template_text="${template_text//\{voice_gender\}/$voice_gender}"
   template_text="${template_text//\{callname\}/$callname}"
-  template_text="${template_text//\{display_name\}/$display_name}"
-  template_text="${template_text//\{project_name\}/$project_name}"
+  template_text="${template_text//\{display_name\}/$display_spoken}"
+  template_text="${template_text//\{project_name\}/$project_name_spoken}"
   printf '%s\n' "$template_text"
 }
 
@@ -414,9 +567,13 @@ main() {
   fi
 
   local project_reading
-  project_reading="$(resolve_project_reading "$voice_file" "$display_name" "$project_name")"
+  project_reading="$(resolve_project_spoken "$voice_file" "$display_name" "$project_name")"
   local tool_reading
   tool_reading="$(resolve_tool_reading "$voice_file" "$tool_key")"
+  local display_spoken=""
+  local project_name_spoken=""
+  display_spoken="$(spokenify_ascii_spans "$display_name")"
+  project_name_spoken="$(spokenify_ascii_spans "$project_name")"
   local voice_gender
   voice_gender="$(candidate_field_or_empty "$candidates_json" "$index" "voice_gender")"
   if [ -z "$voice_gender" ]; then
@@ -432,8 +589,15 @@ main() {
   fi
 
   local text
-  text="$(expand_template_text "$raw_text" "$project_reading" "$tool_reading" "$voice_gender" "$callname" "$display_name" "$project_name")"
+  text="$(expand_template_text "$raw_text" "$project_reading" "$tool_reading" "$voice_gender" "$callname" "$display_spoken" "$project_name_spoken")"
+  text="$(spokenify_ascii_spans "$text")"
   if [ -z "$text" ]; then
+    play_fallback_sound
+    exit 0
+  fi
+  if contains_ascii_letters "$text"; then
+    debug_log "ascii_guard_failed=1"
+    debug_log "text_after_ascii_guard=$text"
     play_fallback_sound
     exit 0
   fi

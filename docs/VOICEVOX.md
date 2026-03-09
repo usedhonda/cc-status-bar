@@ -62,7 +62,7 @@ The exact JSON contract is documented in [VOICEVOX_TEMPLATE_CONTRACT.md](./VOICE
 The current preferred contract is `version = 2` with persona-like sections:
 
 - `identity`
-  - project name, contiguous katakana reading, default callname
+  - project name, spoken project name, optional spoken alias, default callname
 - `defaults`
   - speaker/style/speed/voice metadata shared by the project
 - `tool_readings`
@@ -89,9 +89,21 @@ The helper supports:
   `VOICEVOX ENGINE`
 - `speed_scale` to make short notification lines read faster
 
-For `project_reading`, prefer a single uninterrupted katakana string such as
+For spoken names, prefer a single uninterrupted katakana string such as
 `シーシーステータスバー` rather than `シーシー ステータス バー` so the line is
-spoken in one flow.
+spoken in one flow. Do not leave ASCII letters in spoken fields.
+
+The runtime resolves the spoken project name in this order:
+
+1. `identity.alias_spoken`
+2. spoken form of `CCSB_DISPLAY_NAME`
+3. `identity.project_spoken`
+4. `identity.project_reading`
+5. spoken form of `identity.project_name`
+6. spoken form of `CCSB_PROJECT`
+
+It also applies a final ASCII guard before synthesis, so the final spoken text
+must not contain raw English letters.
 
 Legacy `version = 1` files still work, but new project files should use the
 `version = 2` contract.

@@ -24,6 +24,18 @@ assert_file_contains() {
   fi
 }
 
+assert_file_not_contains_regex() {
+  local file_path="$1"
+  local pattern="$2"
+
+  if grep -Eq "$pattern" "$file_path"; then
+    printf 'Expected %s not to match /%s/\n' "$file_path" "$pattern" >&2
+    printf '%s\n' "--- $file_path ---" >&2
+    cat "$file_path" >&2 || true
+    fail "unexpected regex match"
+  fi
+}
+
 assert_file_empty() {
   local file_path="$1"
 
@@ -175,9 +187,9 @@ EOF
 
   assert_file_contains "$debug_log" "voice_file=$project_root/.cc-status-bar.voice.json"
   assert_file_contains "$debug_log" "speaker=7"
-  assert_file_contains "$debug_log" "text=permission-template"
+  assert_file_contains "$debug_log" "text=ピーイーアールエムアイエスエスアイオーエヌティーイーエムピーエルエーティーイー"
   assert_file_contains "$curl_log" "speaker=7"
-  assert_file_contains "$curl_log" "text=permission-template"
+  assert_file_contains "$curl_log" "text=ピーイーアールエムアイエスエスアイオーエヌティーイーエムピーエルエーティーイー"
 }
 
 test_uses_runtime_default_speaker_when_project_file_does_not_define_one() {
@@ -215,7 +227,7 @@ EOF
   run_helper "$project_root" "unknown" "$app_support_dir" "$debug_log" "$curl_log" "$afplay_log" "$stub_dir"
 
   assert_file_contains "$debug_log" "speaker=42"
-  assert_file_contains "$debug_log" "text=default-template"
+  assert_file_contains "$debug_log" "text=ディーイーエフエーユーエルティーティーイーエムピーエルエーティーイー"
   assert_file_contains "$curl_log" "speaker=42"
 }
 
@@ -238,6 +250,7 @@ test_v2_templates_expand_placeholders_and_filter_by_tool() {
   "identity": {
     "project_name": "cc-status-bar",
     "project_reading": "シーシーステータスバー",
+    "project_spoken": "シーシーステータスバー",
     "callname": "ご主人様"
   },
   "defaults": {
@@ -307,6 +320,146 @@ EOF
   assert_file_contains "$curl_log" "\"speedScale\": 1.22"
 }
 
+test_alias_spoken_takes_priority_and_ascii_is_removed() {
+  local fixture_dir="$tmp_dir/alias-spoken"
+  local project_root="$fixture_dir/project"
+  local app_support_dir="$fixture_dir/app-support"
+  local stub_dir="$fixture_dir/stubs"
+  local debug_log="$fixture_dir/debug.log"
+  local curl_log="$fixture_dir/curl.log"
+  local afplay_log="$fixture_dir/afplay.log"
+
+  mkdir -p "$project_root" "$app_support_dir"
+  setup_stubs "$stub_dir"
+
+  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+{
+  "version": 2,
+  "identity": {
+    "project_name": "cc-status-bar",
+    "project_spoken": "シーシーステータスバー",
+    "alias_spoken": "シーシーエスビー",
+    "callname": "ご主人様"
+  },
+  "defaults": {
+    "speaker": "四国めたん",
+    "style": "ノーマル",
+    "speed_scale": 1.20,
+    "voice_gender": "female",
+    "callname": "ご主人様"
+  },
+  "tool_readings": {
+    "claude": "クロード",
+    "codex": "コーデックス"
+  },
+  "events": {
+    "default": [
+      {
+        "id": "alias-01",
+        "text": "{display_name}の{tool_reading}、{callname}、まってます。"
+      }
+    ]
+  }
+}
+EOF
+
+  cat > "$app_support_dir/voicevox-runtime.json" <<'EOF'
+{
+  "engine_base_url": "http://127.0.0.1:50021",
+  "default_speaker": 42
+}
+EOF
+
+  : > "$debug_log"
+  : > "$curl_log"
+  : > "$afplay_log"
+
+  PATH="$stub_dir:$PATH" \
+  CCSB_CWD="$project_root" \
+  CCSB_WAITING_REASON="unknown" \
+  CCSB_SOURCE="codex" \
+  CCSB_DISPLAY_NAME="ccsb" \
+  CCSB_PROJECT="cc-status-bar" \
+  CCSB_APP_SUPPORT_DIR="$app_support_dir" \
+  CCSB_VOICEVOX_DEBUG_LOG="$debug_log" \
+  VOICEVOX_TEST_CURL_LOG="$curl_log" \
+  VOICEVOX_TEST_AFPLAY_LOG="$afplay_log" \
+  "$VOICEVOX_SCRIPT"
+
+  assert_file_contains "$debug_log" "project_reading=シーシーエスビー"
+  assert_file_contains "$curl_log" "text=シーシーエスビーのコーデックス、ご主人様、まってます。"
+  assert_file_not_contains_regex "$curl_log" 'text=.*[A-Za-z]'
+}
+
+test_runtime_ascii_project_names_are_spokenified() {
+  local fixture_dir="$tmp_dir/runtime-ascii-project"
+  local project_root="$fixture_dir/project"
+  local app_support_dir="$fixture_dir/app-support"
+  local stub_dir="$fixture_dir/stubs"
+  local debug_log="$fixture_dir/debug.log"
+  local curl_log="$fixture_dir/curl.log"
+  local afplay_log="$fixture_dir/afplay.log"
+
+  mkdir -p "$project_root" "$app_support_dir"
+  setup_stubs "$stub_dir"
+
+  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+{
+  "version": 2,
+  "identity": {
+    "project_name": "tproj-ext",
+    "callname": "ご主人様"
+  },
+  "defaults": {
+    "speaker": "四国めたん",
+    "style": "ノーマル",
+    "speed_scale": 1.20,
+    "voice_gender": "female",
+    "callname": "ご主人様"
+  },
+  "tool_readings": {
+    "claude": "クロード",
+    "codex": "コーデックス"
+  },
+  "events": {
+    "default": [
+      {
+        "id": "runtime-01",
+        "text": "{project_name}の{tool_reading}、{callname}、まってます。"
+      }
+    ]
+  }
+}
+EOF
+
+  cat > "$app_support_dir/voicevox-runtime.json" <<'EOF'
+{
+  "engine_base_url": "http://127.0.0.1:50021",
+  "default_speaker": 42
+}
+EOF
+
+  : > "$debug_log"
+  : > "$curl_log"
+  : > "$afplay_log"
+
+  PATH="$stub_dir:$PATH" \
+  CCSB_CWD="$project_root" \
+  CCSB_WAITING_REASON="unknown" \
+  CCSB_SOURCE="claude" \
+  CCSB_DISPLAY_NAME="tproj-ext" \
+  CCSB_PROJECT="tproj-ext" \
+  CCSB_APP_SUPPORT_DIR="$app_support_dir" \
+  CCSB_VOICEVOX_DEBUG_LOG="$debug_log" \
+  VOICEVOX_TEST_CURL_LOG="$curl_log" \
+  VOICEVOX_TEST_AFPLAY_LOG="$afplay_log" \
+  "$VOICEVOX_SCRIPT"
+
+  assert_file_contains "$debug_log" "project_reading=ティープロジェイエクスト"
+  assert_file_contains "$curl_log" "text=ティープロジェイエクストのクロード、ご主人様、まってます。"
+  assert_file_not_contains_regex "$curl_log" 'text=.*[A-Za-z]'
+}
+
 test_missing_project_file_falls_back_without_calling_voicevox() {
   local fixture_dir="$tmp_dir/missing-project-file"
   local project_root="$fixture_dir/project"
@@ -358,6 +511,8 @@ EOF
 test_searches_parents_and_prefers_reason_specific_template
 test_uses_runtime_default_speaker_when_project_file_does_not_define_one
 test_v2_templates_expand_placeholders_and_filter_by_tool
+test_alias_spoken_takes_priority_and_ascii_is_removed
+test_runtime_ascii_project_names_are_spokenified
 test_missing_project_file_falls_back_without_calling_voicevox
 test_invalid_json_falls_back_to_ping
 

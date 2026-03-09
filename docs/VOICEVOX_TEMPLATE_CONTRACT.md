@@ -20,6 +20,8 @@ The first matching file wins.
   "identity": {
     "project_name": "cc-status-bar",
     "project_reading": "シーシーステータスバー",
+    "project_spoken": "シーシーステータスバー",
+    "alias_spoken": "シーシーエスビー",
     "callname": "ご主人様"
   },
   "defaults": {
@@ -75,6 +77,14 @@ The first matching file wins.
   - Optional.
   - Katakana or VOICEVOX-friendly reading for the project name.
   - Prefer a single uninterrupted reading without spaces so VOICEVOX reads it in one flow.
+- `identity.project_spoken`
+  - Optional but recommended.
+  - The spoken source-of-truth for project notifications.
+  - This should be a contiguous katakana or hiragana string with no ASCII letters.
+- `identity.alias_spoken`
+  - Optional.
+  - Spoken override for the session/display alias.
+  - If present, it wins over project-level spoken names.
 - `identity.callname`
   - Optional.
   - Project-local default user callname.
@@ -175,10 +185,22 @@ The helper expands these placeholders in `text`:
 
 `{project_reading}` is resolved in this order:
 
-1. `identity.project_reading`
-2. `identity.project_name`
-3. `CCSB_DISPLAY_NAME`
-4. `CCSB_PROJECT`
+1. `identity.alias_spoken`
+2. spoken form of `CCSB_DISPLAY_NAME`
+3. `identity.project_spoken`
+4. `identity.project_reading`
+5. spoken form of `identity.project_name`
+6. spoken form of `CCSB_PROJECT`
+
+`{display_name}` and `{project_name}` are also expanded to spoken forms, not raw
+ASCII env values.
+
+The helper applies a final safety guard before synthesis:
+
+- the final spoken text must not contain any ASCII letters
+- remaining ASCII spans are converted to katakana-like spoken forms
+- if ASCII still remains after conversion, the helper falls back to Ping instead
+  of speaking broken text
 
 `{tool_reading}` is resolved in this order:
 
