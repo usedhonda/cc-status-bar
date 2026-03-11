@@ -1,0 +1,210 @@
+{
+  "version": 2,
+  "identity": {
+    "project_name": "cc-status-bar",
+    "project_reading": "シーシーステータスバー",
+    "project_spoken": "シーシーステータスバー",
+    "alias_spoken": "シーシーエスビー",
+    "callname": "だんなぁ"
+  },
+  "defaults": {
+    "speaker": "満別花丸",
+    "style": "元気",
+    "speed_scale": 1.30,
+    "volume_scale": 2.0,
+    "voice_gender": "female",
+    "callname": "だんなぁ"
+  },
+  "tool_readings": {
+    "claude": "クロード",
+    "codex": "コーデックス"
+  },
+  "events": {
+    "default": [
+      {
+        "id": "cc-default-01",
+        "tool": "claude",
+        "text": "{callname}、{project_reading}の{tool_reading}、おへんじまちです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-default-02",
+        "tool": "claude",
+        "text": "{callname}、{project_reading}の{tool_reading}、こえまちです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-default-03",
+        "tool": "claude",
+        "text": "{project_reading}の{tool_reading}、めだけきらきらです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cdx-default-01",
+        "tool": "codex",
+        "text": "{callname}、{project_reading}の{tool_reading}、しじまちだ。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-default-02",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、よばれるのまってる。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-default-03",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、ぽやっとでもまってる。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      }
+    ],
+    "stop": [
+      {
+        "id": "cc-stop-01",
+        "tool": "claude",
+        "text": "{callname}、{project_reading}の{tool_reading}、とまってます。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-stop-02",
+        "tool": "claude",
+        "text": "{project_reading}の{tool_reading}、はんだんまちです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-stop-03",
+        "tool": "claude",
+        "text": "{project_reading}の{tool_reading}、みせさきでとまってます。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cdx-stop-01",
+        "tool": "codex",
+        "text": "{callname}、{project_reading}の{tool_reading}、止まってる。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-stop-02",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、まだみてる。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-stop-03",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、じゅつをとめてます。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      }
+    ],
+    "permission_prompt": [
+      {
+        "id": "cc-perm-01",
+        "tool": "claude",
+        "text": "{callname}、{project_reading}の{tool_reading}、きょかまちです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-perm-02",
+        "tool": "claude",
+        "text": "{project_reading}の{tool_reading}、ひとこえでうごけます。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cc-perm-03",
+        "tool": "claude",
+        "text": "{project_reading}の{tool_reading}、およびまちです。",
+        "speaker": "満別花丸",
+        "style": "元気",
+        "voice_gender": "female",
+        "callname": "だんなぁ",
+        "weight": 1
+      },
+      {
+        "id": "cdx-perm-01",
+        "tool": "codex",
+        "text": "{callname}、{project_reading}の{tool_reading}、許可待ちだ。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-perm-02",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、まだまってる。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      },
+      {
+        "id": "cdx-perm-03",
+        "tool": "codex",
+        "text": "{project_reading}の{tool_reading}、じゅつのゆるしまちです。",
+        "speaker": "玄野武宏",
+        "style": "喜び",
+        "voice_gender": "male",
+        "callname": "しゅじん",
+        "weight": 1
+      }
+    ]
+  }
+}

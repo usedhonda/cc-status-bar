@@ -160,7 +160,7 @@ test_searches_parents_and_prefers_reason_specific_template() {
   mkdir -p "$nested_dir" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 1,
   "speaker": 7,
@@ -185,7 +185,7 @@ EOF
 
   run_helper "$nested_dir" "permission_prompt" "$app_support_dir" "$debug_log" "$curl_log" "$afplay_log" "$stub_dir"
 
-  assert_file_contains "$debug_log" "voice_file=$project_root/.cc-status-bar.voice.json"
+  assert_file_contains "$debug_log" "voice_file=$project_root/.tproj-voice.json"
   assert_file_contains "$debug_log" "speaker=7"
   assert_file_contains "$debug_log" "text=ピーイーアールエムアイエスエスアイオーエヌティーイーエムピーエルエーティーイー"
   assert_file_contains "$curl_log" "speaker=7"
@@ -204,7 +204,7 @@ test_uses_runtime_default_speaker_when_project_file_does_not_define_one() {
   mkdir -p "$project_root" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 1,
   "templates": {
@@ -244,7 +244,7 @@ test_v2_templates_expand_placeholders_and_filter_by_tool() {
   mkdir -p "$nested_dir" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 2,
   "identity": {
@@ -332,7 +332,7 @@ test_alias_spoken_takes_priority_and_ascii_is_removed() {
   mkdir -p "$project_root" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 2,
   "identity": {
@@ -403,7 +403,7 @@ test_runtime_ascii_project_names_are_spokenified() {
   mkdir -p "$project_root" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 2,
   "identity": {
@@ -472,7 +472,7 @@ test_templates_missing_project_context_are_rewritten() {
   mkdir -p "$project_root" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 {
   "version": 2,
   "identity": {
@@ -566,7 +566,7 @@ test_invalid_json_falls_back_to_ping() {
   mkdir -p "$project_root" "$app_support_dir"
   setup_stubs "$stub_dir"
 
-  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+  cat > "$project_root/.tproj-voice.json" <<'EOF'
 { invalid json
 EOF
 
@@ -579,6 +579,45 @@ EOF
   assert_file_contains "$afplay_log" "/System/Library/Sounds/Ping.aiff"
 }
 
+test_legacy_voice_file_name_is_used_as_fallback() {
+  local fixture_dir="$tmp_dir/legacy-fallback"
+  local project_root="$fixture_dir/project"
+  local app_support_dir="$fixture_dir/app-support"
+  local stub_dir="$fixture_dir/stubs"
+  local debug_log="$fixture_dir/debug.log"
+  local curl_log="$fixture_dir/curl.log"
+  local afplay_log="$fixture_dir/afplay.log"
+
+  mkdir -p "$project_root" "$app_support_dir"
+  setup_stubs "$stub_dir"
+
+  cat > "$project_root/.cc-status-bar.voice.json" <<'EOF'
+{
+  "version": 1,
+  "speaker": 7,
+  "templates": {
+    "default": ["legacy-fallback-template"]
+  }
+}
+EOF
+
+  cat > "$app_support_dir/voicevox-runtime.json" <<'EOF'
+{
+  "engine_base_url": "http://127.0.0.1:50021",
+  "default_speaker": 42
+}
+EOF
+
+  : > "$debug_log"
+  : > "$curl_log"
+  : > "$afplay_log"
+
+  run_helper "$project_root" "unknown" "$app_support_dir" "$debug_log" "$curl_log" "$afplay_log" "$stub_dir"
+
+  assert_file_contains "$debug_log" "voice_file=$project_root/.cc-status-bar.voice.json"
+  assert_file_contains "$debug_log" "speaker=7"
+}
+
 test_searches_parents_and_prefers_reason_specific_template
 test_uses_runtime_default_speaker_when_project_file_does_not_define_one
 test_v2_templates_expand_placeholders_and_filter_by_tool
@@ -587,5 +626,6 @@ test_runtime_ascii_project_names_are_spokenified
 test_templates_missing_project_context_are_rewritten
 test_missing_project_file_falls_back_without_calling_voicevox
 test_invalid_json_falls_back_to_ping
+test_legacy_voice_file_name_is_used_as_fallback
 
 printf 'VOICEVOX helper tests passed\n'

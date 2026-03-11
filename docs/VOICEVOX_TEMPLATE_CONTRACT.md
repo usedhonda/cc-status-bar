@@ -6,11 +6,12 @@ This file defines the project-local speech source-of-truth used by
 ## File Name
 
 ```text
-<project-root>/.cc-status-bar.voice.json
+<project-root>/.tproj-voice.json
 ```
 
 The helper starts from `CCSB_CWD` and walks upward toward `/`.
-The first matching file wins.
+The first matching file wins. For backward compatibility, `.cc-status-bar.voice.json`
+is also accepted as a legacy fallback at each directory level.
 
 ## Current Schema (v2)
 

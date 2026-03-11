@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-VOICE_FILE_NAME=".cc-status-bar.voice.json"
+VOICE_FILE_NAME=".tproj-voice.json"
+VOICE_FILE_NAME_LEGACY=".cc-status-bar.voice.json"
 APP_SUPPORT_DIR="${CCSB_APP_SUPPORT_DIR:-$HOME/Library/Application Support/CCStatusBar}"
 RUNTIME_CONFIG="${CCSB_VOICEVOX_RUNTIME_CONFIG:-$APP_SUPPORT_DIR/voicevox-runtime.json}"
 DEFAULT_BASE_URL="${CCSB_VOICEVOX_ENGINE_BASE_URL:-http://127.0.0.1:50021}"
@@ -14,8 +15,9 @@ usage() {
   cat <<'EOF'
 Usage: voicevox-alert.sh
 
-Reads CCSB_* alert context, resolves the nearest .cc-status-bar.voice.json from
-CCSB_CWD upward, resolves a project-local utterance template, synthesizes
+Reads CCSB_* alert context, resolves the nearest .tproj-voice.json (or legacy
+.cc-status-bar.voice.json) from CCSB_CWD upward, resolves a project-local
+utterance template, synthesizes
 speech with VOICEVOX ENGINE, and falls back to
 /System/Library/Sounds/Ping.aiff when speech is unavailable.
 EOF
@@ -83,6 +85,11 @@ find_voice_file() {
   while true; do
     if [ -f "$current_dir/$VOICE_FILE_NAME" ]; then
       printf '%s\n' "$current_dir/$VOICE_FILE_NAME"
+      return 0
+    fi
+
+    if [ -f "$current_dir/$VOICE_FILE_NAME_LEGACY" ]; then
+      printf '%s\n' "$current_dir/$VOICE_FILE_NAME_LEGACY"
       return 0
     fi
 

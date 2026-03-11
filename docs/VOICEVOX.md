@@ -49,11 +49,12 @@ The installer expects:
 Project-local speech templates live in:
 
 ```text
-<project-root>/.cc-status-bar.voice.json
+<project-root>/.tproj-voice.json
 ```
 
 The helper starts from `CCSB_CWD` and walks upward until it finds that file.
-Nearest match wins.
+Nearest match wins. For backward compatibility, `.cc-status-bar.voice.json` is
+also accepted as a legacy fallback when `.tproj-voice.json` is not found.
 
 The exact JSON contract is documented in [VOICEVOX_TEMPLATE_CONTRACT.md](./VOICEVOX_TEMPLATE_CONTRACT.md).
 
