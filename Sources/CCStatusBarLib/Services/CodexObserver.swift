@@ -127,6 +127,7 @@ enum CodexObserver {
                     session.modelProvider = extInfo.modelProvider
                     session.originator = extInfo.originator
                     session.tokenUsage = extInfo.tokenUsage
+                    DebugLog.log("[CodexObserver] Extended info for PID \(pid): ver=\(extInfo.cliVersion ?? "nil") tokens=\(extInfo.tokenUsage?.formattedTotal ?? "nil")")
                 } else {
                     session.sessionId = findCodexSessionId(for: cwd)
                 }
@@ -242,48 +243,48 @@ enum CodexObserver {
         return nil
     }
 
-    /// Find extended Codex session info from session files
-    /// Location: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+    /// Find extended Codex session info from session files.
+    /// Searches recent day directories (today -> 14 days back) for matching cwd.
     private static func findCodexSessionExtended(for cwd: String) -> CodexSessionFileInfo? {
-        guard let todayDir = codexSessionsTodayDir() else { return nil }
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: todayDir.path) else {
-            return nil
-        }
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let sessionsDir = homeDir.appendingPathComponent(".codex/sessions")
 
-        let rolloutFiles = files
-            .filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
-            .sorted()
-            .reversed()
+        guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return nil }
 
-        for filename in rolloutFiles {
-            let filePath = todayDir.appendingPathComponent(filename)
-            if let info = parseCodexSessionFileExtended(filePath, lookingForCwd: cwd) {
-                return info
+        let calendar = Calendar.current
+        let now = Date()
+
+        // Search today and up to 14 days back (most recent first)
+        for daysBack in 0..<14 {
+            guard let date = calendar.date(byAdding: .day, value: -daysBack, to: now) else { continue }
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let day = calendar.component(.day, from: date)
+
+            let dayDir = sessionsDir
+                .appendingPathComponent(String(format: "%04d", year))
+                .appendingPathComponent(String(format: "%02d", month))
+                .appendingPathComponent(String(format: "%02d", day))
+
+            guard FileManager.default.fileExists(atPath: dayDir.path),
+                  let files = try? FileManager.default.contentsOfDirectory(atPath: dayDir.path) else {
+                continue
+            }
+
+            let rolloutFiles = files
+                .filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
+                .sorted()
+                .reversed()  // Most recent first
+
+            for filename in rolloutFiles {
+                let filePath = dayDir.appendingPathComponent(filename)
+                if let info = parseCodexSessionFileExtended(filePath, lookingForCwd: cwd) {
+                    return info
+                }
             }
         }
 
         return nil
-    }
-
-    /// Get today's Codex sessions directory
-    private static func codexSessionsTodayDir() -> URL? {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let sessionsDir = homeDir.appendingPathComponent(".codex/sessions")
-        let now = Date()
-        let calendar = Calendar.current
-        let year = calendar.component(.year, from: now)
-        let month = calendar.component(.month, from: now)
-        let day = calendar.component(.day, from: now)
-
-        let todayDir = sessionsDir
-            .appendingPathComponent(String(format: "%04d", year))
-            .appendingPathComponent(String(format: "%02d", month))
-            .appendingPathComponent(String(format: "%02d", day))
-
-        guard FileManager.default.fileExists(atPath: todayDir.path) else {
-            return nil
-        }
-        return todayDir
     }
 
     /// Find Codex session ID from session files
@@ -346,7 +347,8 @@ enum CodexObserver {
         defer { try? fileHandle.close() }
 
         // --- Head: first line for session_meta ---
-        let headChunkSize = 4096
+        // Codex session_meta includes base_instructions (~15KB), so we need a large read.
+        let headChunkSize = 32768
         guard let headData = try? fileHandle.read(upToCount: headChunkSize),
               let headStr = String(data: headData, encoding: .utf8),
               let firstLine = headStr.split(separator: "\n").first,
@@ -373,19 +375,45 @@ enum CodexObserver {
         fileHandle.seek(toFileOffset: tailOffset)
         if let tailData = try? fileHandle.read(upToCount: Int(min(tailReadSize, fileSize))),
            let tailStr = String(data: tailData, encoding: .utf8) {
-            // Walk lines in reverse to find the latest token_count event
+            // Walk lines in reverse to find the latest token_count event.
+            // Codex JSONL uses nested structure:
+            //   {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{...}}}}
             let lines = tailStr.split(separator: "\n")
             for line in lines.reversed() {
                 guard let ld = line.data(using: .utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: ld) as? [String: Any],
-                      let t = obj["type"] as? String,
-                      t == "token_count",
-                      let p = obj["payload"] as? [String: Any] else {
+                      let obj = try? JSONSerialization.jsonObject(with: ld) as? [String: Any] else {
                     continue
                 }
-                let input = p["input_tokens"] as? Int ?? 0
-                let output = p["output_tokens"] as? Int ?? 0
-                let total = p["total_tokens"] as? Int ?? (input + output)
+                // Support both flat and nested (event_msg wrapper) formats
+                let tokenPayload: [String: Any]?
+                if let t = obj["type"] as? String, t == "token_count" {
+                    // Flat: {"type":"token_count","payload":{...}}
+                    tokenPayload = obj["payload"] as? [String: Any] ?? obj
+                } else if let t = obj["type"] as? String, t == "event_msg",
+                          let payload = obj["payload"] as? [String: Any],
+                          let innerType = payload["type"] as? String,
+                          innerType == "token_count" {
+                    // Nested: {"type":"event_msg","payload":{"type":"token_count","info":{...}}}
+                    tokenPayload = payload
+                } else {
+                    continue
+                }
+
+                guard let tp = tokenPayload else { continue }
+
+                // Extract from "info.total_token_usage" (nested) or direct fields (flat)
+                let usageDict: [String: Any]?
+                if let infoDict = tp["info"] as? [String: Any],
+                   let totalUsage = infoDict["total_token_usage"] as? [String: Any] {
+                    usageDict = totalUsage
+                } else {
+                    usageDict = tp
+                }
+
+                guard let ud = usageDict else { continue }
+                let input = ud["input_tokens"] as? Int ?? 0
+                let output = ud["output_tokens"] as? Int ?? 0
+                let total = ud["total_tokens"] as? Int ?? (input + output)
                 info.tokenUsage = CodexTokenUsage(inputTokens: input, outputTokens: output, totalTokens: total)
                 break
             }

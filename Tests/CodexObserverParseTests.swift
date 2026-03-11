@@ -151,6 +151,25 @@ final class CodexObserverParseTests: XCTestCase {
         XCTAssertEqual(result?.tokenUsage?.totalTokens, 700)
     }
 
+    func testParseExtendedNestedEventMsgFormat() {
+        // Real Codex JSONL uses event_msg wrapper with nested total_token_usage
+        let json = """
+        {"type":"session_meta","payload":{"id":"sess-nested","cwd":"/tmp/project","cli_version":"0.114.0","model_provider":"openai","originator":"codex_exec"}}
+        {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":511083,"cached_input_tokens":415616,"output_tokens":10150,"reasoning_output_tokens":6506,"total_tokens":521233},"last_token_usage":{"input_tokens":65421},"model_context_window":258400},"rate_limits":null}}
+        """
+        let url = writeSessionFile(json)
+        let result = CodexObserver.parseCodexSessionFileExtended(url, lookingForCwd: "/tmp/project")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.sessionId, "sess-nested")
+        XCTAssertEqual(result?.cliVersion, "0.114.0")
+        XCTAssertEqual(result?.modelProvider, "openai")
+        XCTAssertEqual(result?.originator, "codex_exec")
+        XCTAssertEqual(result?.tokenUsage?.inputTokens, 511083)
+        XCTAssertEqual(result?.tokenUsage?.outputTokens, 10150)
+        XCTAssertEqual(result?.tokenUsage?.totalTokens, 521233)
+        XCTAssertEqual(result?.tokenUsage?.formattedTotal, "521.2K tokens")
+    }
+
     // MARK: - CodexTokenUsage formatting
 
     func testTokenUsageFormatSmall() {
