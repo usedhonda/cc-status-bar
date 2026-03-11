@@ -424,6 +424,25 @@ final class WebSocketManager {
             dict["session_id"] = sessionId
         }
 
+        // Token usage: webhook priority > JSONL file parse
+        let tokenUsage = CodexStatusReceiver.shared.getTokenUsage(for: session.cwd) ?? session.tokenUsage
+        if let usage = tokenUsage {
+            dict["token_usage"] = [
+                "input_tokens": usage.inputTokens,
+                "output_tokens": usage.outputTokens,
+                "total_tokens": usage.totalTokens,
+                "formatted": usage.formattedTotal
+            ]
+        }
+
+        if let cliVersion = session.cliVersion {
+            dict["cli_version"] = cliVersion
+        }
+
+        if let modelProvider = session.modelProvider {
+            dict["model_provider"] = modelProvider
+        }
+
         if status == .waitingInput {
             dict["waiting_reason"] = (waitingReason ?? .unknown).rawValue
         } else if status == .stopped {

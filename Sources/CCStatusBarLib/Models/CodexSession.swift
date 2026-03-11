@@ -1,5 +1,37 @@
 import Foundation
 
+/// Cumulative token usage for a Codex session
+struct CodexTokenUsage: Equatable, Codable {
+    var inputTokens: Int
+    var outputTokens: Int
+    var totalTokens: Int
+
+    /// Human-readable total (e.g., "521K tokens", "1.5M tokens")
+    var formattedTotal: String {
+        Self.format(totalTokens)
+    }
+
+    static func format(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            let millions = Double(count) / 1_000_000.0
+            return String(format: "%.1fM tokens", millions)
+        } else if count >= 1_000 {
+            let thousands = Double(count) / 1_000.0
+            if thousands == Double(Int(thousands)) {
+                return "\(Int(thousands))K tokens"
+            }
+            return String(format: "%.1fK tokens", thousands)
+        }
+        return "\(count) tokens"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case totalTokens = "total_tokens"
+    }
+}
+
 /// Represents an active Codex CLI session
 struct CodexSession: Equatable {
     let pid: pid_t
@@ -27,6 +59,18 @@ struct CodexSession: Equatable {
 
     /// Terminal app name (e.g., "ghostty", "iTerm.app")
     var terminalApp: String?
+
+    /// Token usage from JSONL session file
+    var tokenUsage: CodexTokenUsage?
+
+    /// CLI version from session_meta (e.g., "1.0.7")
+    var cliVersion: String?
+
+    /// Model provider from session_meta (e.g., "openai")
+    var modelProvider: String?
+
+    /// Originator from session_meta (e.g., "codex-cli")
+    var originator: String?
 
     /// Session status (running or waiting_input)
     var status: CodexStatus {
@@ -75,11 +119,17 @@ struct CodexInfo: Codable {
     let isActive: Bool
     let startedAt: Date?
     let sessionId: String?
+    let tokenUsage: CodexTokenUsage?
+    let cliVersion: String?
+    let modelProvider: String?
 
     enum CodingKeys: String, CodingKey {
         case pid
         case isActive = "is_active"
         case startedAt = "started_at"
         case sessionId = "session_id"
+        case tokenUsage = "token_usage"
+        case cliVersion = "cli_version"
+        case modelProvider = "model_provider"
     }
 }

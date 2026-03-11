@@ -233,6 +233,78 @@ final class CodexStatusReceiverTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleTokenUsageEvent() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-token"
+        let event: [String: Any] = [
+            "type": "codex-token-usage",
+            "cwd": cwd,
+            "token_usage": [
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "total_tokens": 1200
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+
+        let usage = receiver.getTokenUsage(for: cwd)
+        XCTAssertNotNil(usage)
+        XCTAssertEqual(usage?.inputTokens, 1000)
+        XCTAssertEqual(usage?.outputTokens, 200)
+        XCTAssertEqual(usage?.totalTokens, 1200)
+        XCTAssertEqual(usage?.formattedTotal, "1.2K tokens")
+    }
+
+    @MainActor
+    func testHandleSessionStartEvent() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-start"
+        let event: [String: Any] = [
+            "type": "codex-session-start",
+            "cwd": cwd,
+            "thread-id": "thread-start-1"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+
+        XCTAssertEqual(receiver.getStatus(for: cwd), .running)
+        let sessionStatus = receiver.getSessionStatus(for: cwd)
+        XCTAssertEqual(sessionStatus?.threadId, "thread-start-1")
+    }
+
+    @MainActor
+    func testUnknownEventTypeIsIgnored() throws {
+        let receiver = CodexStatusReceiver.shared
+        let event: [String: Any] = [
+            "type": "codex-unknown-event",
+            "cwd": "/tmp/unknown"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+        // Should not crash and unknown cwd should have no status entry
+        XCTAssertEqual(receiver.getStatus(for: "/tmp/unknown"), .running)  // default
+        XCTAssertNil(receiver.getSessionStatus(for: "/tmp/unknown"))
+    }
+
+    @MainActor
+    func testTokenUsageClearedOnRemoveStatus() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-token-clear"
+        let event: [String: Any] = [
+            "type": "codex-token-usage",
+            "cwd": cwd,
+            "token_usage": ["input_tokens": 500, "output_tokens": 100, "total_tokens": 600]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+        XCTAssertNotNil(receiver.getTokenUsage(for: cwd))
+
+        receiver.removeStatus(for: cwd)
+        XCTAssertNil(receiver.getTokenUsage(for: cwd))
+    }
+
+    @MainActor
     func testWithSyntheticStoppedSessionsAddsWaitingPlaceholder() throws {
         let receiver = CodexStatusReceiver.shared
         let cwd = "/tmp/codex-waiting-placeholder"

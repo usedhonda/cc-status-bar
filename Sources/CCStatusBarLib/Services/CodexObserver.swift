@@ -79,7 +79,10 @@ enum CodexObserver {
             pid: session.pid,
             isActive: true,
             startedAt: session.startedAt,
-            sessionId: session.sessionId
+            sessionId: session.sessionId,
+            tokenUsage: session.tokenUsage,
+            cliVersion: session.cliVersion,
+            modelProvider: session.modelProvider
         )
     }
 
@@ -117,8 +120,16 @@ enum CodexObserver {
             if let cwd = getCwd(for: pid) {
                 var session = CodexSession(pid: pid, cwd: cwd)
 
-                // Try to find session ID from Codex session files
-                session.sessionId = findCodexSessionId(for: cwd)
+                // Try to find extended session info from Codex session files
+                if let extInfo = findCodexSessionExtended(for: cwd) {
+                    session.sessionId = extInfo.sessionId
+                    session.cliVersion = extInfo.cliVersion
+                    session.modelProvider = extInfo.modelProvider
+                    session.originator = extInfo.originator
+                    session.tokenUsage = extInfo.tokenUsage
+                } else {
+                    session.sessionId = findCodexSessionId(for: cwd)
+                }
 
                 // Get TTY and tmux info
                 if let tty = getTTY(for: pid) {
@@ -231,6 +242,50 @@ enum CodexObserver {
         return nil
     }
 
+    /// Find extended Codex session info from session files
+    /// Location: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+    private static func findCodexSessionExtended(for cwd: String) -> CodexSessionFileInfo? {
+        guard let todayDir = codexSessionsTodayDir() else { return nil }
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: todayDir.path) else {
+            return nil
+        }
+
+        let rolloutFiles = files
+            .filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
+            .sorted()
+            .reversed()
+
+        for filename in rolloutFiles {
+            let filePath = todayDir.appendingPathComponent(filename)
+            if let info = parseCodexSessionFileExtended(filePath, lookingForCwd: cwd) {
+                return info
+            }
+        }
+
+        return nil
+    }
+
+    /// Get today's Codex sessions directory
+    private static func codexSessionsTodayDir() -> URL? {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let sessionsDir = homeDir.appendingPathComponent(".codex/sessions")
+        let now = Date()
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: now)
+        let month = calendar.component(.month, from: now)
+        let day = calendar.component(.day, from: now)
+
+        let todayDir = sessionsDir
+            .appendingPathComponent(String(format: "%04d", year))
+            .appendingPathComponent(String(format: "%02d", month))
+            .appendingPathComponent(String(format: "%02d", day))
+
+        guard FileManager.default.fileExists(atPath: todayDir.path) else {
+            return nil
+        }
+        return todayDir
+    }
+
     /// Find Codex session ID from session files
     /// Location: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
     private static func findCodexSessionId(for cwd: String) -> String? {
@@ -272,6 +327,71 @@ enum CodexObserver {
         }
 
         return nil
+    }
+
+    /// Extended parse result from a Codex session JSONL file
+    struct CodexSessionFileInfo {
+        let sessionId: String
+        let cwd: String
+        var cliVersion: String?
+        var modelProvider: String?
+        var originator: String?
+        var tokenUsage: CodexTokenUsage?
+    }
+
+    /// Parse a Codex session JSONL file extracting session_meta (head) + token_count (tail).
+    /// Reads only the first line and last 8KB to stay fast on large files.
+    static func parseCodexSessionFileExtended(_ url: URL, lookingForCwd cwd: String) -> CodexSessionFileInfo? {
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fileHandle.close() }
+
+        // --- Head: first line for session_meta ---
+        let headChunkSize = 4096
+        guard let headData = try? fileHandle.read(upToCount: headChunkSize),
+              let headStr = String(data: headData, encoding: .utf8),
+              let firstLine = headStr.split(separator: "\n").first,
+              let lineData = firstLine.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              let type = json["type"] as? String,
+              type == "session_meta",
+              let payload = json["payload"] as? [String: Any],
+              let fileCwd = payload["cwd"] as? String,
+              fileCwd == cwd,
+              let sessionId = payload["id"] as? String else {
+            return nil
+        }
+
+        var info = CodexSessionFileInfo(sessionId: sessionId, cwd: fileCwd)
+        info.cliVersion = payload["cli_version"] as? String
+        info.modelProvider = payload["model_provider"] as? String
+        info.originator = payload["originator"] as? String
+
+        // --- Tail: last 8KB for latest token_count ---
+        let tailReadSize: UInt64 = 8192
+        let fileSize = fileHandle.seekToEndOfFile()
+        let tailOffset = fileSize > tailReadSize ? fileSize - tailReadSize : 0
+        fileHandle.seek(toFileOffset: tailOffset)
+        if let tailData = try? fileHandle.read(upToCount: Int(min(tailReadSize, fileSize))),
+           let tailStr = String(data: tailData, encoding: .utf8) {
+            // Walk lines in reverse to find the latest token_count event
+            let lines = tailStr.split(separator: "\n")
+            for line in lines.reversed() {
+                guard let ld = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: ld) as? [String: Any],
+                      let t = obj["type"] as? String,
+                      t == "token_count",
+                      let p = obj["payload"] as? [String: Any] else {
+                    continue
+                }
+                let input = p["input_tokens"] as? Int ?? 0
+                let output = p["output_tokens"] as? Int ?? 0
+                let total = p["total_tokens"] as? Int ?? (input + output)
+                info.tokenUsage = CodexTokenUsage(inputTokens: input, outputTokens: output, totalTokens: total)
+                break
+            }
+        }
+
+        return info
     }
 
     /// Parse a Codex session file to find session ID for a specific cwd

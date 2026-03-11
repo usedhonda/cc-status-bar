@@ -40,6 +40,8 @@ final class CodexStatusReceiver: ObservableObject {
     private var lastAlertTime: [String: Date] = [:]
     /// Minimum interval between alert fires for the same cwd
     private let alertCooldown: TimeInterval = 10.0
+    /// cwd -> token usage from webhook (higher priority than JSONL file parse)
+    private var tokenUsageByCwd: [String: CodexTokenUsage] = [:]
 
     private init() {}
 
@@ -64,6 +66,10 @@ final class CodexStatusReceiver: ObservableObject {
         switch eventType {
         case "agent-turn-complete":
             handleAgentTurnComplete(cwd: cwd, json: json)
+        case "codex-token-usage":
+            handleTokenUsage(cwd: cwd, json: json)
+        case "codex-session-start":
+            handleSessionStart(cwd: cwd, json: json)
         default:
             DebugLog.log("[CodexStatusReceiver] Unknown event type: \(eventType)")
         }
@@ -135,6 +141,58 @@ final class CodexStatusReceiver: ObservableObject {
         }
     }
 
+    private func handleTokenUsage(cwd: String?, json: [String: Any]) {
+        guard let cwd = cwd else {
+            DebugLog.log("[CodexStatusReceiver] codex-token-usage without cwd")
+            return
+        }
+
+        guard let tokenData = json["token_usage"] as? [String: Any] else {
+            DebugLog.log("[CodexStatusReceiver] codex-token-usage without token_usage payload")
+            return
+        }
+
+        let input = tokenData["input_tokens"] as? Int ?? 0
+        let output = tokenData["output_tokens"] as? Int ?? 0
+        let total = tokenData["total_tokens"] as? Int ?? (input + output)
+        let usage = CodexTokenUsage(inputTokens: input, outputTokens: output, totalTokens: total)
+        tokenUsageByCwd[cwd] = usage
+
+        objectWillChange.send()
+        DebugLog.log("[CodexStatusReceiver] Token usage updated: \(cwd) -> \(usage.formattedTotal)")
+    }
+
+    private func handleSessionStart(cwd: String?, json: [String: Any]) {
+        guard let cwd = cwd else {
+            DebugLog.log("[CodexStatusReceiver] codex-session-start without cwd")
+            return
+        }
+
+        let threadId = json["thread-id"] as? String
+        let now = Date()
+
+        statusByCwd[cwd] = CodexSessionStatus(
+            status: .running,
+            waitingReason: nil,
+            lastEventAt: now,
+            threadId: threadId,
+            lastSeenAt: now,
+            stoppedAt: nil,
+            isSyntheticStopped: false
+        )
+
+        objectWillChange.send()
+        CodexObserver.invalidateCache()
+        DebugLog.log("[CodexStatusReceiver] Session started: \(cwd) thread=\(threadId ?? "nil")")
+    }
+
+    // MARK: - Token Usage Query
+
+    /// Get token usage for a cwd (webhook priority, then fallback to session file)
+    func getTokenUsage(for cwd: String) -> CodexTokenUsage? {
+        return tokenUsageByCwd[cwd]
+    }
+
     // MARK: - Status Query
 
     /// Get effective status for a cwd (applies timeout logic)
@@ -182,6 +240,7 @@ final class CodexStatusReceiver: ObservableObject {
         acknowledgedCwds.remove(cwd)
         lastPaneCapture.removeValue(forKey: cwd)
         lastAlertTime.removeValue(forKey: cwd)
+        tokenUsageByCwd.removeValue(forKey: cwd)
         objectWillChange.send()
     }
 
@@ -191,6 +250,7 @@ final class CodexStatusReceiver: ObservableObject {
         acknowledgedCwds.removeAll()
         lastPaneCapture.removeAll()
         lastAlertTime.removeAll()
+        tokenUsageByCwd.removeAll()
         objectWillChange.send()
     }
 
