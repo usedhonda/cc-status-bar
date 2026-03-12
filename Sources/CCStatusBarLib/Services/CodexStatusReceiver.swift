@@ -27,6 +27,8 @@ final class CodexStatusReceiver: ObservableObject {
     private let pidDisappearGrace: TimeInterval = 3.0
     /// Keep synthetic stopped sessions for this long before pruning (seconds)
     private let stoppedRetention: TimeInterval = 90.0
+    /// Safety valve: recover waiting_input to running if stuck longer than this (seconds)
+    private let waitingRecoveryTimeout: TimeInterval = 30.0
 
     // MARK: - State
 
@@ -272,28 +274,39 @@ final class CodexStatusReceiver: ObservableObject {
                     AutofocusManager.shared.clearCooldown(sessionId: codexId)
                     lastAlertTime.removeValue(forKey: cwd)
                 } else if tracked.status == .waitingInput {
-                    // Recover only after the waiting markers disappear. Simple hash changes
-                    // are not enough because moving selection inside a question prompt
-                    // should stay yellow.
-                    if let session = activeSessions.first(where: { $0.cwd == cwd }),
-                       let currentCapture = capturePane(for: session) {
-                        let currentHash = Self.hashPaneTail(currentCapture)
-                        if Self.isLikelyWaitingScreen(currentCapture, waitingReason: tracked.waitingReason) {
-                            lastPaneCapture[cwd] = currentHash
-                        } else if Self.shouldRecoverToRunning(
-                            previousPaneHash: lastPaneCapture[cwd],
-                            currentPaneCapture: currentCapture,
-                            waitingReason: tracked.waitingReason
-                        ) {
-                            tracked.status = .running
-                            tracked.waitingReason = nil
-                            tracked.lastEventAt = now
-                            lastPaneCapture.removeValue(forKey: cwd)
-                            acknowledgedCwds.remove(cwd)
-                            DebugLog.log("[CodexStatusReceiver] Waiting markers disappeared, recovering to running: \(cwd)")
-
-                            // Invalidate CodexObserver cache to trigger WebSocket update
-                            CodexObserver.invalidateCache()
+                    // Safety valve: recover to running if waiting_input stuck too long
+                    let waitingDuration = now.timeIntervalSince(tracked.lastEventAt)
+                    if waitingDuration > waitingRecoveryTimeout {
+                        tracked.status = .running
+                        tracked.waitingReason = nil
+                        tracked.lastEventAt = now
+                        lastPaneCapture.removeValue(forKey: cwd)
+                        acknowledgedCwds.remove(cwd)
+                        DebugLog.log("[CodexStatusReceiver] Waiting timeout (\(String(format: "%.0f", waitingDuration))s), recovering to running: \(cwd)")
+                        CodexObserver.invalidateCache()
+                    } else if let session = activeSessions.first(where: { $0.cwd == cwd }) {
+                        // Recover only after the waiting markers disappear. Simple hash changes
+                        // are not enough because moving selection inside a question prompt
+                        // should stay yellow.
+                        if let currentCapture = capturePane(for: session) {
+                            let currentHash = Self.hashPaneTail(currentCapture)
+                            if Self.isLikelyWaitingScreen(currentCapture, waitingReason: tracked.waitingReason) {
+                                lastPaneCapture[cwd] = currentHash
+                            } else if Self.shouldRecoverToRunning(
+                                previousPaneHash: lastPaneCapture[cwd],
+                                currentPaneCapture: currentCapture,
+                                waitingReason: tracked.waitingReason
+                            ) {
+                                tracked.status = .running
+                                tracked.waitingReason = nil
+                                tracked.lastEventAt = now
+                                lastPaneCapture.removeValue(forKey: cwd)
+                                acknowledgedCwds.remove(cwd)
+                                DebugLog.log("[CodexStatusReceiver] Waiting markers disappeared, recovering to running: \(cwd)")
+                                CodexObserver.invalidateCache()
+                            }
+                        } else {
+                            DebugLog.log("[CodexStatusReceiver] capturePane failed for waiting session: \(cwd)")
                         }
                     }
                 }

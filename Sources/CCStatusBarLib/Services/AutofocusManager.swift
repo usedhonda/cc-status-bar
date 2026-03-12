@@ -271,6 +271,13 @@ final class AutofocusManager {
     private func performCodexAutofocus(codexSession: CodexSession, isRed: Bool, retryCount: Int = 0) {
         guard AppSettings.autofocusEnabled else { return }
 
+        // Re-verify status after debounce/retry delay — session may have returned to running
+        let currentStatus = CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
+        guard currentStatus == .waitingInput else {
+            DebugLog.log("[AutofocusManager] Codex status changed to \(currentStatus.rawValue) before autofocus, skipping: \(codexSession.projectName)")
+            return
+        }
+
         if isUserTyping() {
             if retryCount < maxAutofocusRetries {
                 DebugLog.log("[AutofocusManager] User typing, retrying Codex autofocus in \(typingCooldown)s (attempt \(retryCount + 1)/\(maxAutofocusRetries))")

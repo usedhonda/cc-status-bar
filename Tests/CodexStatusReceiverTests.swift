@@ -305,6 +305,48 @@ final class CodexStatusReceiverTests: XCTestCase {
     }
 
     @MainActor
+    func testWaitingTimeoutRecovery() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-timeout"
+        let base = Date()
+
+        // Simulate agent-turn-complete -> waiting_input
+        let event: [String: Any] = [
+            "type": "agent-turn-complete",
+            "cwd": cwd
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+        XCTAssertEqual(receiver.getStatus(for: cwd), .waitingInput)
+
+        // After 31 seconds, reconcile should recover to running
+        let active = [CodexSession(pid: 2001, cwd: cwd)]
+        receiver.reconcileActiveSessions(active, now: base.addingTimeInterval(31))
+        XCTAssertEqual(receiver.getStatus(for: cwd), .running)
+    }
+
+    @MainActor
+    func testWaitingNoTimeoutWithinThreshold() throws {
+        let receiver = CodexStatusReceiver.shared
+        let cwd = "/tmp/codex-no-timeout"
+        let base = Date()
+
+        // Simulate agent-turn-complete -> waiting_input
+        let event: [String: Any] = [
+            "type": "agent-turn-complete",
+            "cwd": cwd
+        ]
+        let data = try JSONSerialization.data(withJSONObject: event)
+        receiver.handleEvent(data)
+        XCTAssertEqual(receiver.getStatus(for: cwd), .waitingInput)
+
+        // After 20 seconds (within 30s threshold), should remain waiting_input
+        let active = [CodexSession(pid: 2002, cwd: cwd)]
+        receiver.reconcileActiveSessions(active, now: base.addingTimeInterval(20))
+        XCTAssertEqual(receiver.getStatus(for: cwd), .waitingInput)
+    }
+
+    @MainActor
     func testWithSyntheticStoppedSessionsAddsWaitingPlaceholder() throws {
         let receiver = CodexStatusReceiver.shared
         let cwd = "/tmp/codex-waiting-placeholder"
