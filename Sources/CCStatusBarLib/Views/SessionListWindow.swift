@@ -257,7 +257,15 @@ struct SessionListWindowView: View {
         _ = codexRefreshTick
         guard showCodex else { return [] }
         let active = Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
-        return CodexStatusReceiver.shared.withSyntheticStoppedSessions(activeSessions: active)
+
+        // Exclude Codex sessions sharing a TTY with any CC session (subprocess of CC)
+        let ccTTYs = Set(observer.sessions.compactMap { $0.tty })
+        let selectable = active.filter { codexSession in
+            guard let tty = codexSession.tty else { return true }
+            return !ccTTYs.contains(tty)
+        }
+
+        return CodexStatusReceiver.shared.withSyntheticStoppedSessions(activeSessions: selectable)
     }
 
     private var totalSessionCount: Int {
