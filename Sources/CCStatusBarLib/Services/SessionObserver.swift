@@ -238,13 +238,13 @@ final class SessionObserver: ObservableObject {
             SessionStore.shared.clearAcknowledged(sessionId: session.sessionId, tty: session.tty)
         }
 
-        // Clear notification, autofocus, and alert cooldowns for sessions that returned to running
+        // Clear notification and autofocus cooldowns for sessions that returned to running
+        // Note: alert cooldown (lastAlertTimeByTTY) is NOT cleared here — it expires
+        // naturally (30s) to prevent flicker (running→waiting→running→waiting) re-firing
         let runningIds = Set(loadedSessions.filter { $0.status == .running }.map { $0.id })
         for session in loadedSessions where session.status == .running {
             NotificationManager.shared.clearCooldown(sessionId: session.id)
             AutofocusManager.shared.clearCooldown(sessionId: session.id)
-            let alertKey = session.tty ?? session.id
-            lastAlertTimeByTTY.removeValue(forKey: alertKey)
         }
     }
 
