@@ -474,7 +474,7 @@ struct PinnedSessionRowView: View {
                         .font(.system(size: 10))
                         .foregroundColor(Color(white: 0.4))
 
-                    Text(displayStatus.label)
+                    Text(session.status.label)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(statusColor)
                 }
@@ -531,16 +531,9 @@ struct PinnedSessionRowView: View {
         }
     }
 
-    private var displayStatus: SessionStatus {
-        let isAcknowledged = observer.isAcknowledged(sessionId: session.id)
-        if isAcknowledged && session.status == .waitingInput {
-            return .running
-        }
-        return session.status
-    }
-
     private var statusColor: Color {
         let isAcknowledged = observer.isAcknowledged(sessionId: session.id)
+        let theme = AppSettings.colorTheme
 
         // Check if tmux session is detached
         var isTmuxDetached = false
@@ -552,20 +545,21 @@ struct PinnedSessionRowView: View {
             return Color(white: 0.4)
         }
 
-        if !isAcknowledged && session.status == .waitingInput {
+        if session.status == .waitingInput {
+            if isAcknowledged {
+                return session.waitingReason == .permissionPrompt
+                    ? Color(nsColor: theme.mutedRedColor)
+                    : Color(nsColor: theme.mutedYellowColor)
+            }
             return session.waitingReason == .permissionPrompt
-                ? Color(red: 1.0, green: 0.3, blue: 0.3)
-                : Color(red: 1.0, green: 0.7, blue: 0.2)
+                ? Color(nsColor: theme.redColor)
+                : Color(nsColor: theme.yellowColor)
         }
 
-        switch displayStatus {
-        case .running:
-            return Color(red: 0.3, green: 0.85, blue: 0.4)
-        case .waitingInput:
-            return Color(red: 1.0, green: 0.7, blue: 0.2)
-        case .stopped:
-            return Color(white: 0.5)
+        if session.status == .running {
+            return Color(nsColor: theme.greenColor)
         }
+        return Color(white: 0.5)
     }
 
     private func focusSession() {
@@ -722,14 +716,8 @@ struct PinnedCodexSessionRowView: View {
         CodexStatusReceiver.shared.isAcknowledged(cwd: codexSession.cwd)
     }
 
-    /// Display status considering acknowledge state
-    /// Note: idle sessions always show as idle regardless of ack state
-    private var displayStatus: CodexStatus {
-        (isAcked && status == .waitingInput && waitingReason != .idle) ? .running : status
-    }
-
     private var statusLabel: String {
-        switch displayStatus {
+        switch status {
         case .waitingInput:
             if waitingReason == .permissionPrompt { return "Permission" }
             if waitingReason == .idle { return "Idle" }
@@ -742,19 +730,26 @@ struct PinnedCodexSessionRowView: View {
     }
 
     private var statusColor: Color {
+        let theme = AppSettings.colorTheme
+
         if status == .stopped {
             return Color(white: 0.5)
         }
-        if !isAcked && status == .waitingInput {
-            if waitingReason == .permissionPrompt {
-                return Color(red: 1.0, green: 0.3, blue: 0.3)
-            }
+        if status == .waitingInput {
             if waitingReason == .idle {
                 return Color(white: 0.55)
             }
-            return Color(red: 1.0, green: 0.7, blue: 0.2)
+            if isAcked {
+                return waitingReason == .permissionPrompt
+                    ? Color(nsColor: theme.mutedRedColor)
+                    : Color(nsColor: theme.mutedYellowColor)
+            }
+            if waitingReason == .permissionPrompt {
+                return Color(nsColor: theme.redColor)
+            }
+            return Color(nsColor: theme.yellowColor)
         }
-        return Color(red: 0.3, green: 0.85, blue: 0.4)
+        return Color(nsColor: theme.greenColor)
     }
 
     private func focusCodexSession() {

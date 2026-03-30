@@ -60,6 +60,16 @@ public enum ColorTheme: String, CaseIterable {
         }
     }
 
+    /// Muted red for acknowledged waiting (permission prompt)
+    public var mutedRedColor: NSColor {
+        redColor.withAlphaComponent(0.5)
+    }
+
+    /// Muted yellow for acknowledged waiting (stop/unknown)
+    public var mutedYellowColor: NSColor {
+        yellowColor.withAlphaComponent(0.5)
+    }
+
     /// Color for idle/no sessions
     public var whiteColor: NSColor {
         switch self {

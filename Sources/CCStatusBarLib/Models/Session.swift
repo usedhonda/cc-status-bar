@@ -25,7 +25,7 @@ struct Session: Codable, Identifiable, Equatable {
     var questionOptions: [String]? = nil  // AskUserQuestion option labels
     var questionSelected: Int? = nil  // AskUserQuestion selected index
     var isToolRunning: Bool?  // true during PreToolUse..PostToolUse (show spinner)
-    var isAcknowledged: Bool?  // true if user has seen this waiting session (show as green)
+    var isAcknowledged: Bool?  // true if user has seen this waiting session (show muted color)
     var displayOrder: Int?  // Display order in menu (stable across restarts, inherited on TTY reuse)
     var isDisambiguated: Bool?  // true if project name was expanded to parent/child format due to duplicate basenames
 
