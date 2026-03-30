@@ -70,6 +70,10 @@ struct Session: Codable, Identifiable, Equatable {
     /// Environment label showing terminal and tmux status
     /// e.g., "Ghostty/tmux", "iTerm2", "Ghostty", "VS Code", "Cursor", "Zed"
     /// Delegates to EnvironmentResolver for single source of truth
+    ///
+    /// - Warning: This calls EnvironmentResolver.resolve() synchronously, which may execute
+    ///   NSAppleScript. Do NOT call from SwiftUI view body — use @State + .task{} instead.
+    ///   See: https://github.com/usedhonda/cc-status-bar/issues/13
     var environmentLabel: String {
         EnvironmentResolver.shared.resolve(session: self).displayName
     }
