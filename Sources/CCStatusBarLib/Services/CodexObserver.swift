@@ -257,6 +257,11 @@ enum CodexObserver {
         // This avoids false exclusion when the subcommand name appears in paths or other arguments.
         let tokens = normalized.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         if tokens.contains("mcp-server") { return false }
+        // `codex app-server` is the GUI Codex.app / Computer Use protocol server,
+        // not an interactive terminal CLI session. It shares the `codex` executable
+        // name (so pgrep -x catches it) and often inherits a CLI session's cwd,
+        // producing duplicate entries. Exclude it.
+        if tokens.contains("app-server") { return false }
         if tokens.contains("exec") { return false }
         if tokens.contains("--dangerously-bypass-approvals-and-sandbox") { return false }
 

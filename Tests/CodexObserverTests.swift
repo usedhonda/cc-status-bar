@@ -25,6 +25,18 @@ final class CodexObserverTests: XCTestCase {
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex mcp-server --stdio"))
     }
 
+    func testShouldNotTrackCodexAppServerCommandLine() {
+        // `codex app-server` is the GUI Codex.app / Computer Use protocol server,
+        // not an interactive terminal CLI session.
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex app-server --listen stdio://"))
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"))
+    }
+
+    func testShouldTrackCodexWithAppServerInPath() {
+        // "app-server" appears in a path argument, not as a standalone subcommand
+        XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex --cwd /projects/app-server-demo"))
+    }
+
     func testShouldTrackCodexEmptyAndWhitespace() {
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine(""))
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("   "))
