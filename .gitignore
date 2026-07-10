@@ -40,7 +40,13 @@ secrets/
 
 .codex/config.toml
 
-AGENTS.md
 
 # Machine-local VOICEVOX installer
 scripts/install-voicevox-engine.sh
+
+# >>> project-bootstrap local-only >>>
+CLAUDE.local.md
+.codex/config.toml
+.local/
+.cc-status-bar.voice.json
+# <<< project-bootstrap local-only <<<
