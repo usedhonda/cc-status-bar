@@ -423,14 +423,11 @@ struct PinnedSessionRowView: View {
     @ObservedObject var observer: SessionObserver
     @State private var isHovered = false
     @State private var isPressed = false
+    @State private var env: FocusEnvironment = .unknown
 
     // Watch for sessionDisplayMode changes to trigger re-render
     @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
     private var displayModeRaw: String = "project"
-
-    private var env: FocusEnvironment {
-        EnvironmentResolver.shared.resolve(session: session)
-    }
 
     /// Computed display text based on sessionDisplayMode setting
     private var displayText: String {
@@ -478,7 +475,7 @@ struct PinnedSessionRowView: View {
                     .truncationMode(.middle)
 
                 HStack(spacing: 4) {
-                    Text(session.environmentLabel)
+                    Text(env.displayName)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(Color(white: 0.5))
 
@@ -541,6 +538,13 @@ struct PinnedSessionRowView: View {
                 }
             }
         }
+        .task(id: "\(session.id)|\(session.updatedAt.timeIntervalSince1970)") {
+            let resolved = await Task.detached {
+                EnvironmentResolver.shared.resolve(session: session)
+            }.value
+            guard !Task.isCancelled else { return }
+            env = resolved
+        }
     }
 
     private var displayStatus: SessionStatus {
@@ -592,6 +596,7 @@ struct PinnedCodexSessionRowView: View {
     @ObservedObject private var statusReceiver = CodexStatusReceiver.shared
     @State private var isHovered = false
     @State private var isPressed = false
+    @State private var env: FocusEnvironment = .unknown
 
     // Watch for sessionDisplayMode changes to trigger re-render
     @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
@@ -601,10 +606,6 @@ struct PinnedCodexSessionRowView: View {
     private var displayText: String {
         let mode = SessionDisplayMode(rawValue: displayModeRaw) ?? .projectName
         return codexSession.displayText(for: mode)
-    }
-
-    private var env: FocusEnvironment {
-        CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
     }
 
     private var status: CodexStatus {
@@ -719,6 +720,13 @@ struct PinnedCodexSessionRowView: View {
                     NSPasteboard.general.setString(tty, forType: .string)
                 }
             }
+        }
+        .task(id: codexSession.id) {
+            let resolved = await Task.detached {
+                CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
+            }.value
+            guard !Task.isCancelled else { return }
+            env = resolved
         }
     }
 
