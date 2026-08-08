@@ -1,47 +1,136 @@
 import Foundation
+import Darwin
 import os
 
 enum DebugLog {
-    private static let logger = Logger(subsystem: "com.ccstatusbar.app", category: "debug")
+    enum Level: Int {
+        case debug = 0
+        case info = 1
+    }
 
-    static func log(_ message: String) {
+    private static let maxLogBytes: UInt64 = 50 * 1024 * 1024
+    private static let logger = Logger(subsystem: "com.ccstatusbar.app", category: "debug")
+    private static let stateLock = NSLock()
+    private static let timestampLock = NSLock()
+    private static var logDirectoryCreated = false
+    private static var fileHandle: FileHandle?
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let debugOnlyPatterns = [
+        "Cache hit",
+        "cache hit",
+        "Found pane",
+        "Found tmux pane",
+        "Found Codex PID",
+        "Detected terminal for Codex",
+        "Tab titles cache hit",
+        "Tab descriptors cache hit",
+        "TTY tab index cache hit",
+        "Terminal cache hit",
+        "isUserTyping check",
+        "Keystroke detected"
+    ]
+
+    static func log(_ message: String, level explicitLevel: Level? = nil) {
+        let level = explicitLevel ?? inferredLevel(for: message)
+        guard shouldWrite(message: message, explicitLevel: explicitLevel) else { return }
+
         // Visible in Console.app
-        logger.info("\(message, privacy: .public)")
+        switch level {
+        case .debug:
+            logger.debug("\(message, privacy: .public)")
+        case .info:
+            logger.info("\(message, privacy: .public)")
+        }
         NSLog("[CCStatusBar] \(message)")
 
         // Append to log file
-        if let url = logFileURL() {
-            let line = "[\(timestamp())] \(message)\n"
-            append(line, to: url)
+        guard let data = "[\(timestamp())] \(message)\n".data(using: .utf8) else { return }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        if let url = logFileURL(createDirectoryIfNeeded: true) {
+            rotateLogIfNeeded(at: url, maxBytes: maxLogBytes)
+            append(data, to: url)
         }
     }
 
-    private static func logFileURL() -> URL? {
+    static func shouldWrite(
+        message: String,
+        explicitLevel: Level? = nil,
+        verbose: Bool = verboseLoggingEnabled()
+    ) -> Bool {
+        let level = explicitLevel ?? inferredLevel(for: message)
+        return verbose || level.rawValue >= Level.info.rawValue
+    }
+
+    static func inferredLevel(for message: String) -> Level {
+        debugOnlyPatterns.contains { message.contains($0) } ? .debug : .info
+    }
+
+    private static func verboseLoggingEnabled() -> Bool {
+        let env = ProcessInfo.processInfo.environment["CCSTATUSBAR_DEBUG_LOG_VERBOSE"]
+        if env == "1" || env?.lowercased() == "true" {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "CCStatusBarDebugVerboseLogging")
+    }
+
+    private static func logFileURL(createDirectoryIfNeeded: Bool) -> URL? {
         let fm = FileManager.default
         guard let dir = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else { return nil }
         let folder = dir.appendingPathComponent("Logs/CCStatusBar", isDirectory: true)
-        do { try fm.createDirectory(at: folder, withIntermediateDirectories: true) } catch { return nil }
+        if createDirectoryIfNeeded, !logDirectoryCreated {
+            do {
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                logDirectoryCreated = true
+            } catch {
+                return nil
+            }
+        }
         return folder.appendingPathComponent("debug.log")
     }
 
-    private static func append(_ line: String, to url: URL) {
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: url.path) {
-                if let handle = try? FileHandle(forWritingTo: url) {
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                    try? handle.close()
-                }
-            } else {
-                try? data.write(to: url)
-            }
+    static func rotateLogIfNeeded(at url: URL, maxBytes: UInt64) {
+        let fm = FileManager.default
+        guard
+            let attrs = try? fm.attributesOfItem(atPath: url.path),
+            let fileSize = attrs[.size] as? NSNumber,
+            fileSize.uint64Value >= maxBytes
+        else {
+            return
         }
+
+        try? fileHandle?.close()
+        fileHandle = nil
+
+        let rotatedURL = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).1")
+        if fm.fileExists(atPath: rotatedURL.path) {
+            try? fm.removeItem(at: rotatedURL)
+        }
+        try? fm.moveItem(at: url, to: rotatedURL)
+    }
+
+    private static func append(_ data: Data, to url: URL) {
+        if fileHandle == nil {
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+            if fd < 0 {
+                return
+            }
+            fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        }
+        try? fileHandle?.write(contentsOf: data)
     }
 
     private static func timestamp() -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.string(from: Date())
+        timestampLock.lock()
+        defer { timestampLock.unlock() }
+        return timestampFormatter.string(from: Date())
     }
 
     // MARK: - Diagnostics
@@ -128,7 +217,7 @@ enum DebugLog {
 
         // Log file
         info.append("-- Log File --")
-        if let logURL = logFileURL() {
+        if let logURL = logFileURL(createDirectoryIfNeeded: true) {
             info.append("Log File: \(maskPath(logURL.path))")
             info.append("Log File Exists: \(fm.fileExists(atPath: logURL.path))")
         }
