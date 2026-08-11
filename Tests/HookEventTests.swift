@@ -45,4 +45,44 @@ final class HookEventTests: XCTestCase {
         XCTAssertFalse(event.isAskUserQuestion)
         XCTAssertNil(event.question)
     }
+
+    func testDecodePostToolBatchPayload() throws {
+        let json = """
+        {
+          "session_id": "s1",
+          "cwd": "/Users/test/project",
+          "hook_event_name": "PostToolBatch",
+          "tool_calls": [
+            {
+              "tool_name": "Bash",
+              "tool_input": {"command": "pwd"},
+              "tool_use_id": "toolu_123",
+              "tool_response": "/Users/test/project"
+            }
+          ]
+        }
+        """
+
+        let event = try JSONDecoder().decode(HookEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.hookEventName, .postToolBatch)
+        XCTAssertEqual(event.sessionId, "s1")
+    }
+
+    func testPostToolBatchClearsToolRunningFlag() throws {
+        let json = """
+        {
+          "session_id": "s1",
+          "cwd": "/Users/test/project",
+          "hook_event_name": "PostToolBatch",
+          "tool_calls": []
+        }
+        """
+
+        let event = try JSONDecoder().decode(HookEvent.self, from: Data(json.utf8))
+        let result = SessionStore.determineStatusAndReason(event: event, current: .running)
+
+        XCTAssertEqual(result.0, .running)
+        XCTAssertNil(result.1)
+        XCTAssertFalse(result.2)
+    }
 }

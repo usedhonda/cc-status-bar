@@ -17,6 +17,7 @@ final class SetupManager {
         "Stop",
         "UserPromptSubmit",
         "PreToolUse",
+        "PostToolBatch",
         "SessionStart",
         "SessionEnd"
     ]
@@ -126,6 +127,17 @@ final class SetupManager {
         } else {
             // Check if app was moved
             checkAndUpdateIfMoved()
+        }
+
+        if UserDefaults.standard.bool(forKey: Keys.didCompleteSetup) {
+            do {
+                let addedEvents = try registerMissingClaudeHooksIfNeeded()
+                if !addedEvents.isEmpty {
+                    DebugLog.log("[SetupManager] Added missing Claude hooks: \(addedEvents.joined(separator: ", "))")
+                }
+            } catch {
+                DebugLog.log("[SetupManager] Failed to add missing Claude hooks: \(error)")
+            }
         }
 
         // Register Codex notify (if Codex is installed)
@@ -430,6 +442,68 @@ final class SetupManager {
                 ["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"]
             ]
         ]
+    }
+
+    @discardableResult
+    private func registerMissingClaudeHooksIfNeeded() throws -> [String] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: Self.settingsFile.path) else { return [] }
+
+        let originalData = try Data(contentsOf: Self.settingsFile)
+        guard var settings = try JSONSerialization.jsonObject(with: originalData) as? [String: Any] else {
+            throw SetupError.settingsParseError(reason: "settings.json root is not an object")
+        }
+
+        let addedEvents = Self.applyMissingHookRegistration(
+            to: &settings,
+            hookPath: Self.symlinkURL.path
+        )
+        guard !addedEvents.isEmpty else { return [] }
+
+        let backupURL = Self.claudeDir.appendingPathComponent("settings.json.bak")
+        try originalData.write(to: backupURL)
+        DebugLog.log("[SetupManager] Backup created: \(backupURL.path)")
+
+        let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: Self.settingsFile, options: .atomic)
+        return addedEvents
+    }
+
+    static func applyMissingHookRegistration(
+        to settings: inout [String: Any],
+        hookPath: String
+    ) -> [String] {
+        var hooks = settings["hooks"] as? [String: [[String: Any]]] ?? [:]
+        var addedEvents: [String] = []
+
+        for eventName in hookEvents {
+            let eventHooks = hooks[eventName] ?? []
+            let hasOwnHook = eventHooks.contains { hookEntry in
+                guard let innerHooks = hookEntry["hooks"] as? [[String: Any]] else {
+                    return false
+                }
+                return innerHooks.contains { hook in
+                    guard let command = hook["command"] as? String else { return false }
+                    return isOwnHookCommand(command)
+                }
+            }
+
+            guard !hasOwnHook else { continue }
+
+            var updatedHooks = eventHooks
+            updatedHooks.append([
+                "hooks": [
+                    ["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"]
+                ]
+            ])
+            hooks[eventName] = updatedHooks
+            addedEvents.append(eventName)
+        }
+
+        guard !addedEvents.isEmpty else { return [] }
+
+        settings["hooks"] = hooks
+        return addedEvents
     }
 
     @discardableResult

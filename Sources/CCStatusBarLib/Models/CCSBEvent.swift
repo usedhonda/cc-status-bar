@@ -161,7 +161,7 @@ extension CCSBEvent {
             attention = CCSBAttentionInfo(level: .green, reason: "User submitted prompt")
             summary = "Running"
 
-        case .preToolUse, .postToolUse:
+        case .preToolUse, .postToolUse, .postToolBatch:
             eventType = .sessionRunning
             attention = CCSBAttentionInfo(level: .green, reason: "Tool execution")
             summary = "Running"

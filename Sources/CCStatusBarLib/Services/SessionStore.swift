@@ -155,7 +155,7 @@ final class SessionStore {
         var session: Session
 
         if var existing = data.sessions[key] {
-            let (status, waitingReason, isToolRunning) = determineStatusAndReason(event: event, current: existing.status)
+            let (status, waitingReason, isToolRunning) = Self.determineStatusAndReason(event: event, current: existing.status)
             DebugLog.log("[SessionStore] Update session \(key): \(existing.status) -> \(status), reason: \(String(describing: waitingReason)), toolRunning: \(isToolRunning)")
             existing.status = status
             existing.waitingReason = waitingReason
@@ -201,7 +201,7 @@ final class SessionStore {
                 }
             }
 
-            let (status, waitingReason, isToolRunning) = determineStatusAndReason(event: event, current: nil)
+            let (status, waitingReason, isToolRunning) = Self.determineStatusAndReason(event: event, current: nil)
             // Assign displayOrder: inherit from replaced session or assign new
             let newDisplayOrder: Int
             if let inherited = inheritedDisplayOrder {
@@ -573,7 +573,7 @@ final class SessionStore {
         }
     }
 
-    private func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?, Bool) {
+    static func determineStatusAndReason(event: HookEvent, current: SessionStatus?) -> (SessionStatus, WaitingReason?, Bool) {
         switch event.hookEventName {
         case .sessionEnd:
             return (.stopped, nil, false)  // Will be removed anyway
@@ -591,7 +591,7 @@ final class SessionStore {
             return (current ?? .running, nil, false)
         case .preToolUse:
             return (.running, nil, true)  // Tool is running - show spinner
-        case .postToolUse:
+        case .postToolUse, .postToolBatch:
             return (current ?? .running, nil, false)  // Tool finished
         case .userPromptSubmit, .sessionStart:
             return (.running, nil, false)  // Not running tool yet

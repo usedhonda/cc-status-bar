@@ -7,7 +7,7 @@ public struct HookCommand: ParsableCommand {
         abstract: "Handle a hook event from Claude Code"
     )
 
-    @Argument(help: "The hook event name (PreToolUse, PostToolUse, Notification, Stop, UserPromptSubmit, SessionStart, SessionEnd)")
+    @Argument(help: "The hook event name (PreToolUse, PostToolUse, PostToolBatch, Notification, Stop, UserPromptSubmit, SessionStart, SessionEnd)")
     var eventName: String
 
     public init() {}

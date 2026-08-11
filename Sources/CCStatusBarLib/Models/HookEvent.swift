@@ -20,6 +20,7 @@ struct HookQuestionPayload: Codable {
 enum HookEventName: String, Codable {
     case preToolUse = "PreToolUse"
     case postToolUse = "PostToolUse"
+    case postToolBatch = "PostToolBatch"
     case notification = "Notification"
     case stop = "Stop"
     case userPromptSubmit = "UserPromptSubmit"
