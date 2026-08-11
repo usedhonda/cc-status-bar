@@ -14,6 +14,7 @@ final class SessionObserver: ObservableObject {
     private var ghostCleanupTimer: Timer?
     private var lastObservedStoreMTime: Date?
     private var lastClaudeGhostCleanupAt: Date = .distantPast
+    private var isClaudeGhostCleanupRunning = false
     private var previousSessionIds: Set<String> = []  // Track known sessions for Bind-on-start
     private var previousSessionStatuses: [String: SessionStatus] = [:]  // Track status for notifications
     private var isInitialLoad = true  // Skip notifications on first load to avoid spam at startup
@@ -105,7 +106,7 @@ final class SessionObserver: ObservableObject {
     // MARK: - File Reading
 
     private func loadSessions() {
-        reconcileClaudeGhostSessionsIfNeeded()
+        scheduleClaudeGhostReconcileIfNeeded()
 
         // Invalidate TmuxHelper and CodexObserver caches when session file changes
         TmuxHelper.invalidatePaneInfoCache()
@@ -456,25 +457,37 @@ final class SessionObserver: ObservableObject {
         ghostCleanupTimer = Timer.scheduledTimer(withTimeInterval: claudeGhostCleanupInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                let result = self.reconcileClaudeGhostSessionsIfNeeded(force: true)
-                if result?.changed == true {
-                    self.loadSessions()
-                }
+                self.scheduleClaudeGhostReconcileIfNeeded(force: true)
             }
         }
     }
 
-    @discardableResult
-    private func reconcileClaudeGhostSessionsIfNeeded(
+    private func scheduleClaudeGhostReconcileIfNeeded(
         now: Date = Date(),
         force: Bool = false
-    ) -> ClaudeGhostCleanupResult? {
+    ) {
         guard force || now.timeIntervalSince(lastClaudeGhostCleanupAt) >= claudeGhostCleanupInterval else {
-            return nil
+            return
+        }
+        guard !isClaudeGhostCleanupRunning else {
+            return
         }
 
         lastClaudeGhostCleanupAt = now
-        return SessionStore.shared.reconcileClaudeGhostSessions(now: now)
+        isClaudeGhostCleanupRunning = true
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = SessionStore.shared.reconcileClaudeGhostSessions(now: now)
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.isClaudeGhostCleanupRunning = false
+                    if result.changed {
+                        self.loadSessions()
+                    }
+                }
+            }
+        }
     }
 
     private func currentStoreModificationDate() -> Date? {
