@@ -1,7 +1,24 @@
 import Foundation
 
+struct ClaudeAgentRecord: Decodable {
+    let sessionId: String?
+    let cwd: String?
+    let pid: Int?
+}
+
+struct ClaudeGhostCleanupResult: Equatable {
+    var markedStopped: [String] = []
+    var removed: [String] = []
+    var skippedReason: String?
+
+    var changed: Bool {
+        !markedStopped.isEmpty || !removed.isEmpty
+    }
+}
+
 final class SessionStore {
     static let shared = SessionStore()
+    static let claudeGhostRemovalGrace: TimeInterval = 60 * 60
 
     private let storeDir: URL
     private let storeFile: URL
@@ -350,7 +367,144 @@ final class SessionStore {
         saveData(StoreData())
     }
 
+    @discardableResult
+    func reconcileClaudeGhostSessions(now: Date = Date()) -> ClaudeGhostCleanupResult {
+        guard let liveSessionIds = Self.fetchLiveClaudeSessionIds() else {
+            DebugLog.log("[SessionStore] Claude ghost cleanup skipped: claude agents unavailable")
+            return ClaudeGhostCleanupResult(skippedReason: "claude agents unavailable")
+        }
+
+        var data = loadData()
+        let result = Self.applyClaudeGhostCleanup(
+            to: &data,
+            liveSessionIds: liveSessionIds,
+            now: now,
+            removalGrace: Self.claudeGhostRemovalGrace
+        )
+
+        guard result.changed else { return result }
+
+        data.updatedAt = now
+        saveData(data)
+        DebugLog.log(
+            "[SessionStore] Claude ghost cleanup: markedStopped=\(result.markedStopped.count), removed=\(result.removed.count)"
+        )
+        return result
+    }
+
+    static func applyClaudeGhostCleanup(
+        to data: inout StoreData,
+        liveSessionIds: Set<String>,
+        now: Date,
+        removalGrace: TimeInterval
+    ) -> ClaudeGhostCleanupResult {
+        var result = ClaudeGhostCleanupResult()
+
+        for (key, session) in data.sessions {
+            if liveSessionIds.contains(session.sessionId) {
+                continue
+            }
+
+            let age = now.timeIntervalSince(session.updatedAt)
+            if age >= removalGrace {
+                data.sessions.removeValue(forKey: key)
+                result.removed.append(key)
+                continue
+            }
+
+            if session.status == .stopped {
+                continue
+            }
+
+            var stopped = session
+            stopped.status = .stopped
+            stopped.waitingReason = nil
+            stopped.questionText = nil
+            stopped.questionOptions = nil
+            stopped.questionSelected = nil
+            stopped.isToolRunning = false
+            stopped.updatedAt = now
+            data.sessions[key] = stopped
+            result.markedStopped.append(key)
+        }
+
+        result.markedStopped.sort()
+        result.removed.sort()
+        return result
+    }
+
+    static func parseClaudeAgentSessionIds(from data: Data) -> Set<String>? {
+        guard let agents = try? JSONDecoder().decode([ClaudeAgentRecord].self, from: data) else {
+            return nil
+        }
+        return Set(agents.compactMap { record in
+            guard let sessionId = record.sessionId, !sessionId.isEmpty else { return nil }
+            return sessionId
+        })
+    }
+
     // MARK: - Private
+
+    private static func fetchLiveClaudeSessionIds() -> Set<String>? {
+        let (executable, arguments) = claudeAgentsCommand()
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            DebugLog.log("[SessionStore] Failed to run claude agents: \(error.localizedDescription)")
+            return nil
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            semaphore.signal()
+        }
+
+        guard semaphore.wait(timeout: .now() + 5) == .success else {
+            process.terminate()
+            DebugLog.log("[SessionStore] claude agents timed out")
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            let errorText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            DebugLog.log("[SessionStore] claude agents failed (\(process.terminationStatus)): \(errorText)")
+            return nil
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let sessionIds = parseClaudeAgentSessionIds(from: data) else {
+            DebugLog.log("[SessionStore] Failed to parse claude agents output")
+            return nil
+        }
+        return sessionIds
+    }
+
+    private static func claudeAgentsCommand() -> (URL, [String]) {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/.local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude"
+        ]
+
+        for path in candidates where fm.isExecutableFile(atPath: path) {
+            return (URL(fileURLWithPath: path), ["agents", "--json"])
+        }
+
+        return (URL(fileURLWithPath: "/usr/bin/env"), ["claude", "agents", "--json"])
+    }
 
     /// Detect duplicate project basenames and mark them for disambiguation
     /// Once marked, sessions stay disambiguated even if duplicates are removed (for stability)
