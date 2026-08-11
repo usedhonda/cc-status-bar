@@ -28,6 +28,8 @@ struct Session: Codable, Identifiable, Equatable {
     var isAcknowledged: Bool?  // true if user has seen this waiting session (show as green)
     var displayOrder: Int?  // Display order in menu (stable across restarts, inherited on TTY reuse)
     var isDisambiguated: Bool?  // true if project name was expanded to parent/child format due to duplicate basenames
+    var contextUsedPercentage: Double?  // Claude Code statusline context_window.used_percentage
+    var totalCostUSD: Double?  // Claude Code statusline cost.total_cost_usd
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -65,6 +67,17 @@ struct Session: Codable, Identifiable, Equatable {
 
     var displayPath: String {
         cwd.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+    }
+
+    var usageSummaryText: String? {
+        var parts: [String] = []
+        if let contextUsedPercentage {
+            parts.append("\(Int(contextUsedPercentage.rounded()))%")
+        }
+        if let totalCostUSD {
+            parts.append(String(format: "$%.2f", locale: Locale(identifier: "en_US_POSIX"), totalCostUSD))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Environment label showing terminal and tmux status
@@ -113,5 +126,7 @@ struct Session: Codable, Identifiable, Equatable {
         case isAcknowledged = "is_acknowledged"
         case displayOrder = "display_order"
         case isDisambiguated = "is_disambiguated"
+        case contextUsedPercentage = "context_used_percentage"
+        case totalCostUSD = "total_cost_usd"
     }
 }

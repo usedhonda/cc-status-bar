@@ -85,6 +85,11 @@ final class SetupManager {
         return try! NSRegularExpression(pattern: pattern)
     }()
 
+    enum StatuslineRegistrationResult: Equatable {
+        case registered
+        case skippedExisting
+    }
+
     // MARK: - Public API
 
     /// Run setup wizard. Use force=true to reconfigure even if already set up.
@@ -128,6 +133,21 @@ final class SetupManager {
 
         // Register Codex hooks (SessionStart + Stop)
         registerCodexHooksIfNeeded()
+
+        // Register Claude Code statusline only after the user has completed setup.
+        if UserDefaults.standard.bool(forKey: Keys.didCompleteSetup) {
+            do {
+                let result = try registerStatuslineIfNeeded()
+                switch result {
+                case .registered:
+                    DebugLog.log("[SetupManager] Claude statusline registered")
+                case .skippedExisting:
+                    DebugLog.log("[SetupManager] Claude statusline already configured, skipping")
+                }
+            } catch {
+                DebugLog.log("[SetupManager] Failed to register Claude statusline: \(error)")
+            }
+        }
     }
 
     // MARK: - Translocation Detection
@@ -410,6 +430,54 @@ final class SetupManager {
                 ["type": "command", "command": "\"\(hookPath)\" hook \(eventName)"]
             ]
         ]
+    }
+
+    @discardableResult
+    func registerStatuslineIfNeeded() throws -> StatuslineRegistrationResult {
+        let fm = FileManager.default
+
+        if !fm.fileExists(atPath: Self.claudeDir.path) {
+            try fm.createDirectory(at: Self.claudeDir, withIntermediateDirectories: true)
+        }
+
+        var settings: [String: Any] = [:]
+        var originalData: Data?
+
+        if fm.fileExists(atPath: Self.settingsFile.path) {
+            originalData = try Data(contentsOf: Self.settingsFile)
+            guard let json = try JSONSerialization.jsonObject(with: originalData!) as? [String: Any] else {
+                throw SetupError.settingsParseError(reason: "settings.json root is not an object")
+            }
+            settings = json
+        }
+
+        let result = Self.applyStatuslineRegistration(to: &settings, hookPath: Self.symlinkURL.path)
+        guard result == .registered else { return result }
+
+        if let originalData = originalData {
+            let backupURL = Self.claudeDir.appendingPathComponent("settings.json.bak")
+            try originalData.write(to: backupURL)
+            DebugLog.log("[SetupManager] Backup created: \(backupURL.path)")
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: Self.settingsFile, options: .atomic)
+        return result
+    }
+
+    static func applyStatuslineRegistration(
+        to settings: inout [String: Any],
+        hookPath: String
+    ) -> StatuslineRegistrationResult {
+        guard settings["statusLine"] == nil else {
+            return .skippedExisting
+        }
+
+        settings["statusLine"] = [
+            "type": "command",
+            "command": "\"\(hookPath)\" statusline"
+        ]
+        return .registered
     }
 
     // MARK: - Move Detection

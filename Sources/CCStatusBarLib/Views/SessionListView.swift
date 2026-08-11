@@ -86,9 +86,17 @@ struct SessionRowView: View {
 
             Spacer()
 
-            Text(session.status.label)
-                .font(.system(size: 10))
-                .foregroundColor(session.status.color)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(session.status.label)
+                    .font(.system(size: 10))
+                    .foregroundColor(session.status.color)
+
+                if let usageSummary = session.usageSummaryText {
+                    Text(usageSummary)
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+            }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)

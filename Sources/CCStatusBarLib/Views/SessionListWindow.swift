@@ -489,6 +489,16 @@ struct PinnedSessionRowView: View {
                     Text(displayStatus.label)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(statusColor)
+
+                    if let usageSummary = session.usageSummaryText {
+                        Text("•")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(white: 0.4))
+
+                        Text(usageSummary)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Color(white: 0.5))
+                    }
                 }
             }
 

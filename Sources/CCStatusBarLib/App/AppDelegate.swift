@@ -979,10 +979,11 @@ $CCSB_TMUX_PANE_TARGET
         )
         attributed.append(pathAttr)
 
-        // Line 3:   Environment • Status • HH:mm
+        // Line 3:   Environment • Status • Usage • HH:mm
         let timeStr = formatTime(session.updatedAt)
+        let usageSuffix = session.usageSummaryText.map { " • \($0)" } ?? ""
         let infoAttr = NSAttributedString(
-            string: "\n   \(session.environmentLabel) • \(displayStatus.label) • \(timeStr)",
+            string: "\n   \(session.environmentLabel) • \(displayStatus.label)\(usageSuffix) • \(timeStr)",
             attributes: [
                 .foregroundColor: secondaryTextColor,
                 .font: NSFont.systemFont(ofSize: 12)

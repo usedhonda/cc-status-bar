@@ -368,6 +368,52 @@ final class SessionStore {
     }
 
     @discardableResult
+    func updateStatusline(_ update: StatuslineUpdate, now: Date = Date()) -> StatuslineUpdateResult {
+        var data = loadData()
+        let result = Self.applyStatuslineUpdate(to: &data, update: update, now: now)
+        guard result.changed else { return result }
+
+        data.updatedAt = now
+        saveData(data)
+        DebugLog.log("[SessionStore] Statusline updated: \(result.updatedKeys.joined(separator: ", "))", level: .debug)
+        return result
+    }
+
+    static func applyStatuslineUpdate(
+        to data: inout StoreData,
+        update: StatuslineUpdate,
+        now: Date
+    ) -> StatuslineUpdateResult {
+        var result = StatuslineUpdateResult()
+
+        for (key, session) in data.sessions where session.sessionId == update.sessionId {
+            result.matchedKeys.append(key)
+            var updated = session
+            var changed = false
+
+            if let contextUsedPercentage = update.contextUsedPercentage,
+               updated.contextUsedPercentage != contextUsedPercentage {
+                updated.contextUsedPercentage = contextUsedPercentage
+                changed = true
+            }
+
+            if let totalCostUSD = update.totalCostUSD,
+               updated.totalCostUSD != totalCostUSD {
+                updated.totalCostUSD = totalCostUSD
+                changed = true
+            }
+
+            guard changed else { continue }
+
+            updated.updatedAt = now
+            data.sessions[key] = updated
+            result.updatedKeys.append(key)
+        }
+
+        return result
+    }
+
+    @discardableResult
     func reconcileClaudeGhostSessions(now: Date = Date()) -> ClaudeGhostCleanupResult {
         guard let liveSessionIds = Self.fetchLiveClaudeSessionIds() else {
             DebugLog.log("[SessionStore] Claude ghost cleanup skipped: claude agents unavailable")
