@@ -1,5 +1,228 @@
 import Foundation
 import Combine
+import Darwin
+
+struct CodexSessionSnapshot {
+    let sessions: [String: CodexSession]
+    let generation: Int
+    let cacheAge: TimeInterval?
+    let source: String
+    let refreshDuration: TimeInterval?
+    let discoveredCount: Int
+    let excludedCounts: [String: Int]
+}
+
+struct CodexPaneIdentity: Equatable {
+    let paneID: String
+    let panePID: pid_t
+    let panePIDStart: String?
+    let agentPID: pid_t
+    let agentPIDStart: String?
+}
+
+struct CodexStableTmuxInfo: Equatable {
+    let paneID: String
+    let panePID: pid_t
+    let panePIDStart: String?
+    let agentPID: pid_t
+    let agentPIDStart: String?
+    let session: String
+    let window: String
+    let pane: String
+    let socketPath: String?
+}
+
+private struct CodexScanResult {
+    let sessions: [String: CodexSession]
+    let paneInfoByPID: [pid_t: CodexStableTmuxInfo]
+    let excludedCounts: [String: Int]
+    let discoveredCount: Int
+}
+
+struct CodexRefreshResult<Value> {
+    let generation: Int
+    let value: Value?
+    let duration: TimeInterval
+    let succeeded: Bool
+}
+
+/// A bounded, single-flight refresh coordinator used by the live Codex snapshot.
+/// It never exposes stale values to callers waiting for an authoritative snapshot.
+final class CodexRefreshCoordinator<Value>: @unchecked Sendable {
+    struct Snapshot {
+        let value: Value?
+        let generation: Int
+        let cacheAge: TimeInterval?
+        let source: String
+        let refreshDuration: TimeInterval?
+    }
+
+    private let freshTTL: TimeInterval
+    private let scan: @Sendable () async throws -> Value
+    private let onApplied: (@Sendable (CodexRefreshResult<Value>) -> Void)?
+    private let lock = NSLock()
+    private var generation = 0
+    private var cache: (value: Value, timestamp: Date, generation: Int)?
+    private var active: (generation: Int, task: Task<CodexRefreshResult<Value>, Never>)?
+    private var appliedGeneration = 0
+
+    init(
+        freshTTL: TimeInterval = 5.0,
+        scan: @escaping @Sendable () async throws -> Value,
+        onApplied: (@Sendable (CodexRefreshResult<Value>) -> Void)? = nil
+    ) {
+        self.freshTTL = freshTTL
+        self.scan = scan
+        self.onApplied = onApplied
+    }
+
+    func invalidate() {
+        lock.lock()
+        if let cache {
+            self.cache = (cache.value, cache.timestamp.addingTimeInterval(-freshTTL), cache.generation)
+        }
+        lock.unlock()
+    }
+
+    func cachedValue() -> (value: Value, timestamp: Date, generation: Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache
+    }
+
+    func snapshot(deadline: TimeInterval) async -> Snapshot {
+        let now = Date()
+        let prepared = prepareRefresh(now: now)
+        if let fresh = prepared.fresh {
+            return fresh
+        }
+        guard let task = prepared.task else {
+            fatalError("Refresh preparation returned neither cache nor task")
+        }
+        let emptyGeneration = prepared.generation
+        let staleAge = prepared.staleAge
+
+        let refresh = await withTaskGroup(of: CodexRefreshResult<Value>?.self) { group in
+            group.addTask { await task.value }
+            group.addTask {
+                let nanoseconds = UInt64(max(0, deadline) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+
+        guard let refresh else {
+            return Snapshot(
+                value: nil,
+                generation: emptyGeneration,
+                cacheAge: staleAge,
+                source: "deadline",
+                refreshDuration: nil
+            )
+        }
+        return Snapshot(
+            value: refresh.value,
+            generation: refresh.generation,
+            cacheAge: 0,
+            source: refresh.succeeded ? "refresh" : "refresh-failure",
+            refreshDuration: refresh.duration
+        )
+    }
+
+    private func prepareRefresh(now: Date) -> (
+        fresh: Snapshot?,
+        task: Task<CodexRefreshResult<Value>, Never>?,
+        generation: Int,
+        staleAge: TimeInterval?
+    ) {
+        lock.lock()
+        if let cache, now.timeIntervalSince(cache.timestamp) < freshTTL {
+            let result = Snapshot(
+                value: cache.value,
+                generation: cache.generation,
+                cacheAge: now.timeIntervalSince(cache.timestamp),
+                source: "fresh",
+                refreshDuration: nil
+            )
+            lock.unlock()
+            return (result, nil, cache.generation, now.timeIntervalSince(cache.timestamp))
+        }
+        let task = ensureRefreshLocked()
+        let emptyGeneration = generation
+        let staleAge = cache.map { now.timeIntervalSince($0.timestamp) }
+        lock.unlock()
+        return (nil, task, emptyGeneration, staleAge)
+    }
+
+    @discardableResult
+    func beginNewGenerationForTesting() -> Int {
+        lock.lock()
+        generation += 1
+        active = nil
+        let current = generation
+        lock.unlock()
+        return current
+    }
+
+    private func ensureRefreshLocked() -> Task<CodexRefreshResult<Value>, Never> {
+        if let active {
+            return active.task
+        }
+
+        generation += 1
+        let refreshGeneration = generation
+        let scan = self.scan
+        let task = Task.detached(priority: .utility) {
+            let started = Date()
+            do {
+                let value = try await scan()
+                return CodexRefreshResult(
+                    generation: refreshGeneration,
+                    value: value,
+                    duration: Date().timeIntervalSince(started),
+                    succeeded: true
+                )
+            } catch {
+                return CodexRefreshResult(
+                    generation: refreshGeneration,
+                    value: nil,
+                    duration: Date().timeIntervalSince(started),
+                    succeeded: false
+                )
+            }
+        }
+        active = (refreshGeneration, task)
+
+        Task { [weak self] in
+            let result = await task.value
+            self?.apply(result)
+        }
+        return task
+    }
+
+    private func apply(_ result: CodexRefreshResult<Value>) {
+        var shouldNotify = false
+        lock.lock()
+        guard result.generation == generation,
+              result.generation > appliedGeneration else {
+            lock.unlock()
+            return
+        }
+        appliedGeneration = result.generation
+        active = nil
+        if let value = result.value, result.succeeded {
+            cache = (value, Date(), result.generation)
+            shouldNotify = true
+        }
+        lock.unlock()
+        if shouldNotify {
+            onApplied?(result)
+        }
+    }
+}
 
 /// Observes active Codex CLI sessions by monitoring running processes
 /// Matches Codex sessions with Claude Code sessions by cwd
@@ -11,18 +234,38 @@ enum CodexObserver {
 
     // MARK: - Cache
 
-    /// Cache for active Codex sessions (3-state: fresh / stale / empty)
-    private static var sessionsCache: (sessions: [String: CodexSession], timestamp: Date)?
-    private static let freshTTL: TimeInterval = 5.0    // Fresh: return immediately
-    private static let staleTTL: TimeInterval = 30.0   // Stale: return cached, refresh in background
-    private static var isRefreshing = false             // Prevent concurrent background refreshes
-
-    /// Mark cache as stale (don't clear — stale data is still returned immediately)
-    static func invalidateCache() {
-        if let cached = sessionsCache {
-            sessionsCache = (cached.sessions, cached.timestamp.addingTimeInterval(-freshTTL))
-            DebugLog.log("[CodexObserver] Cache marked stale")
+    private static let freshTTL: TimeInterval = 5.0
+    private static let subscriberDeadline: TimeInterval = 0.8
+    private static let snapshotCoordinator = CodexRefreshCoordinator<CodexScanResult>(
+        freshTTL: freshTTL,
+        scan: {
+            fetchCodexScan()
+        },
+        onApplied: { result in
+            Task { @MainActor in
+                guard let scan = result.value else { return }
+                publishScan(scan, generation: result.generation, duration: result.duration)
+            }
         }
+    )
+    private static var paneInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
+    private static var lastDiagnostics: CodexRefreshDiagnostics?
+
+    struct CodexRefreshDiagnostics: Equatable {
+        let generation: Int
+        let cacheAge: TimeInterval?
+        let source: String
+        let refreshDuration: TimeInterval?
+        let discoveredCount: Int
+        let includedCount: Int
+        let excludedCounts: [String: Int]
+        let correctiveBroadcast: Bool
+    }
+
+    /// Mark cache as stale and let the existing single-flight scan converge it.
+    static func invalidateCache() {
+        snapshotCoordinator.invalidate()
+        DebugLog.log("[CodexObserver] cache invalidated")
     }
 
     // MARK: - Public API
@@ -42,28 +285,123 @@ enum CodexObserver {
     /// Legacy implementation: pgrep-based discovery with stale-while-revalidate cache.
     static func getActiveSessionsLegacy() -> [String: CodexSession] {
         let now = Date()
-
-        if let cached = sessionsCache {
-            let age = now.timeIntervalSince(cached.timestamp)
-
-            if age < freshTTL {
-                // Fresh: return immediately
-                return cached.sessions
+        if let cached = snapshotCoordinator.cachedValue() {
+            if now.timeIntervalSince(cached.timestamp) < freshTTL {
+                return cached.value.sessions
             }
-
-            if age < staleTTL {
-                // Stale: return cached data, trigger background refresh
-                triggerBackgroundRefresh()
-                return cached.sessions
-            }
+            triggerBackgroundRefresh()
+            return cached.value.sessions
         }
 
-        // Empty or expired: return empty and fetch in background
-        // Never block the main thread with synchronous Process calls —
-        // waitUntilExit() spins the RunLoop, which can trigger SwiftUI body
-        // re-evaluation and cause re-entrant crashes (EXC_BAD_ACCESS).
         triggerBackgroundRefresh()
-        return sessionsCache?.sessions ?? [:]
+        return [:]
+    }
+
+    /// Get an authoritative snapshot for a new WebSocket subscriber.
+    /// Stale data is never returned here. A timeout returns an empty Codex set;
+    /// the refresh completion publishes one corrective full-list broadcast.
+    @MainActor
+    static func snapshotForSubscriber() async -> CodexSessionSnapshot {
+        if useHooksMode {
+            CodexHooksSessionStore.shared.pruneDeadProcesses()
+            return CodexSessionSnapshot(
+                sessions: CodexHooksSessionStore.shared.activeSessions,
+                generation: 0,
+                cacheAge: 0,
+                source: "hooks",
+                refreshDuration: nil,
+                discoveredCount: CodexHooksSessionStore.shared.activeSessions.count,
+                excludedCounts: [:]
+            )
+        }
+
+        let snapshot = await snapshotCoordinator.snapshot(deadline: subscriberDeadline)
+        let scan = snapshot.value
+        let sessions = scan?.sessions ?? [:]
+        let discovered = scan?.discoveredCount ?? 0
+        let excluded = scan?.excludedCounts ?? [:]
+        if let scan {
+            paneInfoByPID = scan.paneInfoByPID
+        }
+        let diagnostics = CodexRefreshDiagnostics(
+            generation: snapshot.generation,
+            cacheAge: snapshot.cacheAge,
+            source: snapshot.source,
+            refreshDuration: snapshot.refreshDuration,
+            discoveredCount: discovered,
+            includedCount: sessions.count,
+            excludedCounts: excluded,
+            correctiveBroadcast: false
+        )
+        logDiagnostics(diagnostics)
+        return CodexSessionSnapshot(
+            sessions: sessions,
+            generation: snapshot.generation,
+            cacheAge: snapshot.cacheAge,
+            source: snapshot.source,
+            refreshDuration: snapshot.refreshDuration,
+            discoveredCount: discovered,
+            excludedCounts: excluded
+        )
+    }
+
+    @MainActor
+    static func stableTmuxInfo(for session: CodexSession) -> CodexStableTmuxInfo? {
+        guard let info = paneInfoByPID[session.pid],
+              info.agentPID == session.pid,
+              info.agentPIDStart == processStartToken(for: session.pid) else {
+            return nil
+        }
+        return info
+    }
+
+    @MainActor
+    static func logCorrectiveBroadcast() {
+        guard let diagnostics = lastDiagnostics else { return }
+        logDiagnostics(CodexRefreshDiagnostics(
+            generation: diagnostics.generation,
+            cacheAge: diagnostics.cacheAge,
+            source: diagnostics.source,
+            refreshDuration: diagnostics.refreshDuration,
+            discoveredCount: diagnostics.discoveredCount,
+            includedCount: diagnostics.includedCount,
+            excludedCounts: diagnostics.excludedCounts,
+            correctiveBroadcast: true
+        ))
+    }
+
+    @MainActor
+    private static func publishScan(_ scan: CodexScanResult, generation: Int, duration: TimeInterval) {
+        paneInfoByPID = scan.paneInfoByPID
+        let diagnostics = CodexRefreshDiagnostics(
+            generation: generation,
+            cacheAge: 0,
+            source: "refresh",
+            refreshDuration: duration,
+            discoveredCount: scan.discoveredCount,
+            includedCount: scan.sessions.count,
+            excludedCounts: scan.excludedCounts,
+            correctiveBroadcast: false
+        )
+        lastDiagnostics = diagnostics
+        logDiagnostics(diagnostics)
+        NotificationCenter.default.post(name: .codexSessionsDidUpdate, object: nil)
+    }
+
+    private static func logDiagnostics(_ diagnostics: CodexRefreshDiagnostics) {
+        let cacheAge = diagnostics.cacheAge.map { String(format: "%.0f", $0 * 1000) } ?? "nil"
+        let duration = diagnostics.refreshDuration.map { String(format: "%.0f", $0 * 1000) } ?? "nil"
+        let exclusions = diagnostics.excludedCounts
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\($0.value)" }
+            .joined(separator: ",")
+        DebugLog.log(
+            "[CodexObserver] snapshot generation=\(diagnostics.generation) cacheAgeMs=\(cacheAge) " +
+            "source=\(diagnostics.source) refreshDurationMs=\(duration) " +
+            "discovered=\(diagnostics.discoveredCount) included=\(diagnostics.includedCount) " +
+            "exclusionReason=\(exclusions.isEmpty ? "none" : exclusions) " +
+            "correctiveBroadcast=\(diagnostics.correctiveBroadcast)"
+        )
     }
 
     /// Check if Codex is running for a specific cwd
@@ -103,21 +441,9 @@ enum CodexObserver {
 
     // MARK: - Background Refresh
 
-    /// Trigger a background refresh of Codex sessions (stale-while-revalidate)
     private static func triggerBackgroundRefresh() {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-
-        DispatchQueue.global(qos: .utility).async {
-            let sessions = fetchCodexSessions()
-            let now = Date()
-
-            DispatchQueue.main.async {
-                sessionsCache = (sessions, now)
-                isRefreshing = false
-                NotificationCenter.default.post(name: .codexSessionsDidUpdate, object: nil)
-                DebugLog.log("[CodexObserver] Background refresh complete (\(sessions.count) sessions)")
-            }
+        Task.detached(priority: .utility) {
+            _ = await snapshotCoordinator.snapshot(deadline: 0)
         }
     }
 
@@ -125,7 +451,7 @@ enum CodexObserver {
 
     /// Public wrapper for fetchCodexSessions (used by hooks mode bootstrap)
     static func fetchCodexSessionsPublic() -> [String: CodexSession] {
-        fetchCodexSessions()
+        fetchCodexScan().sessions
     }
 
     /// Find PID for a given cwd by scanning running Codex processes
@@ -151,13 +477,13 @@ enum CodexObserver {
 
     // MARK: - Private
 
-    /// Fetch active Codex sessions from running processes
-    private static func fetchCodexSessions() -> [String: CodexSession] {
+    /// Fetch active Codex sessions and stable pane evidence from running processes.
+    private static func fetchCodexScan() -> CodexScanResult {
         var sessions: [String: CodexSession] = [:]
+        var paneInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
 
-        // Get Codex process PIDs
-        // Pattern: /opt/homebrew/lib/node_modules/@openai/codex/vendor...codex
-        let pids = getCodexPIDs()
+        let pidScan = getCodexPIDScan()
+        let pids = pidScan.pids
 
         for pid in pids {
             if let cwd = getCwd(for: pid) {
@@ -170,36 +496,36 @@ enum CodexObserver {
                     session.modelProvider = extInfo.modelProvider
                     session.originator = extInfo.originator
                     session.tokenUsage = extInfo.tokenUsage
-                    DebugLog.log("[CodexObserver] Extended info for PID \(pid): ver=\(extInfo.cliVersion ?? "nil") tokens=\(extInfo.tokenUsage?.formattedTotal ?? "nil")")
                 } else {
                     session.sessionId = findCodexSessionId(for: cwd)
                 }
 
-                // Get TTY and tmux info
                 if let tty = getTTY(for: pid) {
                     session.tty = tty
-                    if let paneInfo = TmuxHelper.getPaneInfo(for: tty) {
-                        session.tmuxSession = paneInfo.session
-                        session.tmuxWindow = paneInfo.window
-                        session.tmuxPane = paneInfo.pane
-                        session.tmuxSocketPath = paneInfo.socketPath
-                        DebugLog.log("[CodexObserver] Found tmux pane for Codex PID \(pid): \(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)")
+                    if let stablePane = resolveStablePane(for: pid, tty: tty) {
+                        session.tmuxSession = stablePane.session
+                        session.tmuxWindow = stablePane.window
+                        session.tmuxPane = stablePane.pane
+                        session.tmuxSocketPath = stablePane.socketPath
+                        paneInfoByPID[pid] = stablePane
 
-                        // Detect terminal app from tmux client
-                        if let terminalApp = TmuxHelper.getClientTerminalInfo(for: paneInfo.session) {
+                        if let terminalApp = TmuxHelper.getClientTerminalInfo(for: stablePane.session) {
                             session.terminalApp = terminalApp
-                            DebugLog.log("[CodexObserver] Detected terminal for Codex: \(terminalApp)")
                         }
                     }
                 }
 
                 let key = "codex:\(pid)"
                 sessions[key] = session
-                DebugLog.log("[CodexObserver] Found Codex PID \(pid) in \(session.projectName)")
             }
         }
 
-        return sessions
+        return CodexScanResult(
+            sessions: sessions,
+            paneInfoByPID: paneInfoByPID,
+            excludedCounts: pidScan.excludedCounts,
+            discoveredCount: pids.count
+        )
     }
 
     /// Get TTY for a process
@@ -218,8 +544,11 @@ enum CodexObserver {
         return "/dev/\(tty)"
     }
 
-    /// Get PIDs of running Codex processes
     private static func getCodexPIDs() -> [pid_t] {
+        getCodexPIDScan().pids
+    }
+
+    private static func getCodexPIDScan() -> (pids: [pid_t], excludedCounts: [String: Int]) {
         var pidSet = Set<pid_t>()
 
         // Current Codex CLI typically runs as a direct executable named "codex"
@@ -233,45 +562,189 @@ enum CodexObserver {
             }
         }
 
-        // Exclude helper/background subcommands that are not interactive Codex CLI sessions.
-        // Example: `codex mcp-server` started by Claude Code.
+        var excludedCounts: [String: Int] = [:]
         let filteredPIDs = pidSet.filter { pid in
             let commandLine = getCommandLine(for: pid)
-            let shouldTrack = shouldTrackCodexCommandLine(commandLine)
-            if !shouldTrack {
-                DebugLog.log("[CodexObserver] Skipping non-interactive Codex process PID \(pid): \(commandLine)")
+            if let reason = codexCommandExclusionReason(commandLine) {
+                excludedCounts[reason, default: 0] += 1
+                return false
             }
-            return shouldTrack
+            return true
         }
 
-        return Array(filteredPIDs).sorted()
+        return (Array(filteredPIDs).sorted(), excludedCounts)
     }
 
     /// Check whether a Codex command line should be tracked as an active Codex session.
     /// Visible for tests.
     static func shouldTrackCodexCommandLine(_ commandLine: String) -> Bool {
+        codexCommandExclusionReason(commandLine) == nil
+    }
+
+    static func codexCommandExclusionReason(_ commandLine: String) -> String? {
         let normalized = commandLine.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return false }
+        guard !normalized.isEmpty else { return "empty-command" }
 
         // Tokenize and check if non-interactive subcommands appear as standalone arguments.
         // This avoids false exclusion when the subcommand name appears in paths or other arguments.
         let tokens = normalized.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        if tokens.contains("mcp-server") { return false }
+        if tokens.contains("mcp-server") { return "mcp-server" }
         // `codex app-server` is the GUI Codex.app / Computer Use protocol server,
         // not an interactive terminal CLI session. It shares the `codex` executable
         // name (so pgrep -x catches it) and often inherits a CLI session's cwd,
         // producing duplicate entries. Exclude it.
-        if tokens.contains("app-server") { return false }
-        if tokens.contains("exec") { return false }
-        if tokens.contains("--dangerously-bypass-approvals-and-sandbox") { return false }
+        if tokens.contains("app-server") { return "app-server" }
+        if tokens.contains("exec") { return "exec" }
+        if tokens.contains("--dangerously-bypass-approvals-and-sandbox") { return "unsafe-mode" }
 
-        return true
+        return nil
     }
 
     /// Get full command line for a process
     private static func getCommandLine(for pid: pid_t) -> String {
         runCommand("/bin/ps", ["-p", "\(pid)", "-o", "command="])
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private struct LivePaneRow {
+        let paneID: String
+        let panePID: pid_t
+        let tty: String
+        let session: String
+        let window: String
+        let pane: String
+    }
+
+    private static func resolveStablePane(for agentPID: pid_t, tty: String) -> CodexStableTmuxInfo? {
+        let agentStart = processStartToken(for: agentPID)
+        guard !tty.isEmpty else { return nil }
+
+        let paths: [String?] = [nil] + discoverTmuxSocketPaths().map(Optional.some)
+        for socketPath in paths {
+            let format = "#{pane_id}\\t#{pane_pid}\\t#{pane_tty}\\t#{session_name}\\t#{window_index}\\t#{pane_index}\\t#{window_name}"
+            var args: [String] = []
+            if let socketPath, !socketPath.isEmpty {
+                args += ["-S", socketPath]
+            }
+            args += ["list-panes", "-a", "-F", format]
+            let output = runCommand(tmuxExecutable(), args)
+            for line in output.split(separator: "\n") {
+                guard let row = parseLivePaneRow(line),
+                      TmuxHelper.normalizeTTY(row.tty) == TmuxHelper.normalizeTTY(tty),
+                      row.paneID.hasPrefix("%"),
+                      row.panePID > 0,
+                      isProcessDescendant(agentPID, of: row.panePID) else {
+                    continue
+                }
+                return CodexStableTmuxInfo(
+                    paneID: row.paneID,
+                    panePID: row.panePID,
+                    panePIDStart: processStartToken(for: row.panePID),
+                    agentPID: agentPID,
+                    agentPIDStart: agentStart,
+                    session: row.session,
+                    window: row.window,
+                    pane: row.pane,
+                    socketPath: socketPath
+                )
+            }
+        }
+        return nil
+    }
+
+    static func stablePaneIdentityMatches(_ expected: CodexStableTmuxInfo, _ current: CodexStableTmuxInfo) -> Bool {
+        guard expected.paneID == current.paneID,
+              expected.panePID == current.panePID,
+              expected.agentPID == current.agentPID else {
+            return false
+        }
+        if let expectedStart = expected.agentPIDStart,
+           let currentStart = current.agentPIDStart,
+           expectedStart != currentStart {
+            return false
+        }
+        if let expectedPaneStart = expected.panePIDStart,
+           let currentPaneStart = current.panePIDStart,
+           expectedPaneStart != currentPaneStart {
+            return false
+        }
+        return true
+    }
+
+    private static func parseLivePaneRow(_ line: Substring) -> LivePaneRow? {
+        let raw = String(line)
+        let parts: [String]
+        if raw.contains("\\t") {
+            parts = raw.components(separatedBy: "\\t")
+        } else {
+            parts = raw.components(separatedBy: "\t")
+        }
+        guard parts.count >= 6,
+              let panePID = pid_t(parts[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        return LivePaneRow(
+            paneID: parts[0],
+            panePID: panePID,
+            tty: parts[2],
+            session: parts[3],
+            window: parts[4],
+            pane: parts[5]
+        )
+    }
+
+    private static func tmuxExecutable() -> String {
+        for path in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return "tmux"
+    }
+
+    private static func discoverTmuxSocketPaths() -> [String] {
+        let uid = Int(getuid())
+        let directories = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+        var candidates: [String] = []
+        if let tmux = ProcessInfo.processInfo.environment["TMUX"],
+           let socket = tmux.split(separator: ",", maxSplits: 1).first,
+           !socket.isEmpty {
+            candidates.append(String(socket))
+        }
+        for directory in directories {
+            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
+            candidates += entries.map { (directory as NSString).appendingPathComponent($0) }
+        }
+        var seen = Set<String>()
+        return candidates.compactMap { path in
+            let normalized = (path as NSString).standardizingPath
+            guard !normalized.isEmpty,
+                  FileManager.default.fileExists(atPath: normalized),
+                  seen.insert(normalized).inserted else { return nil }
+            return normalized
+        }
+    }
+
+    private static func isProcessDescendant(_ processPID: pid_t, of ancestorPID: pid_t) -> Bool {
+        var current = processPID
+        var visited = Set<pid_t>()
+        while current > 1, visited.insert(current).inserted {
+            if current == ancestorPID { return true }
+            guard let parent = processParentPID(for: current), parent != current else { return false }
+            current = parent
+        }
+        return false
+    }
+
+    private static func processParentPID(for pid: pid_t) -> pid_t? {
+        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "ppid="])
+        return pid_t(output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func processStartToken(for pid: pid_t) -> String? {
+        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "lstart="])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output.isEmpty ? nil : output
     }
 
     /// Get current working directory for a process

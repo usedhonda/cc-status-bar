@@ -6,6 +6,7 @@ final class CodexObserverTests: XCTestCase {
         XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex"))
         XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex --model gpt-5"))
         XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("/opt/homebrew/bin/codex --ask"))
+        XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex resume --last -s danger-full-access"))
     }
 
     func testShouldNotTrackCodexMCPServerCommandLine() {
@@ -30,6 +31,11 @@ final class CodexObserverTests: XCTestCase {
         // not an interactive terminal CLI session.
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex app-server --listen stdio://"))
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"))
+    }
+
+    func testShouldNotTrackCodexExecCommandLine() {
+        XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("codex exec --json 'task'"))
+        XCTAssertEqual(CodexObserver.codexCommandExclusionReason("codex exec --json 'task'"), "exec")
     }
 
     func testShouldTrackCodexWithAppServerInPath() {

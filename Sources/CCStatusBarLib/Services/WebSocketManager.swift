@@ -90,7 +90,14 @@ final class WebSocketManager {
     private var progressTimer: DispatchSourceTimer?
     private var lastProgressHashes: [String: Int] = [:]
 
-    private init() {}
+    private init() {
+        NotificationCenter.default.publisher(for: .codexSessionsDidUpdate)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.broadcastCorrectiveSessionsList()
+            }
+            .store(in: &cancellables)
+    }
 
     // MARK: - Client Management
 
@@ -107,19 +114,16 @@ final class WebSocketManager {
         sendToClient(session, event: hostInfoEvent)
         DebugLog.log("[WebSocketManager] Sent host_info with \(addresses.count) addresses")
 
-        // Send initial session list with icons (both Claude Code and Codex)
-        let claudeSessions = SessionStore.shared.getSessions()
-        let codexSessions = CodexObserver.getActiveSessions()
-        let codexSessionList = CodexStatusReceiver.shared.withSyntheticStoppedSessions(
-            activeSessions: Array(codexSessions.values).sorted { $0.pid < $1.pid }
-        )
-
-        var sessionsData = claudeSessions.map { claudeSessionToDict($0) }
-        sessionsData += codexSessionList.map { codexSessionToDict($0) }
-
-        let icons = generateIcons(claudeSessions: claudeSessions, codexSessions: codexSessionList)
-        let event = WebSocketEvent(type: .sessionsList, sessions: sessionsData, icons: icons)
-        sendToClient(session, event: event)
+        // Never send stale Codex data as an authoritative initial snapshot.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let snapshot = await CodexObserver.snapshotForSubscriber()
+            guard self.clientQueue.sync(execute: { self.connectedClients.contains(session) }) else { return }
+            let codexSessionList = CodexStatusReceiver.shared.withSyntheticStoppedSessions(
+                activeSessions: Array(snapshot.sessions.values).sorted { $0.pid < $1.pid }
+            )
+            self.sendToClient(session, event: self.makeSessionsListEvent(codexSessions: codexSessionList))
+        }
     }
 
     /// Unsubscribe a WebSocket client
@@ -158,6 +162,26 @@ final class WebSocketManager {
         }
 
         DebugLog.log("[WebSocketManager] Broadcast \(event.type.rawValue) to \(clients.count) client(s)")
+    }
+
+    private func broadcastCorrectiveSessionsList() {
+        let clients: Set<WebSocketSession> = clientQueue.sync { connectedClients }
+        guard !clients.isEmpty else { return }
+
+        let codexSessions = CodexStatusReceiver.shared.withSyntheticStoppedSessions(
+            activeSessions: Array(CodexObserver.getActiveSessions().values).sorted { $0.pid < $1.pid }
+        )
+        let event = makeSessionsListEvent(codexSessions: codexSessions)
+        broadcast(event: event)
+        CodexObserver.logCorrectiveBroadcast()
+    }
+
+    private func makeSessionsListEvent(codexSessions: [CodexSession]) -> WebSocketEvent {
+        let claudeSessions = SessionStore.shared.getSessions()
+        var sessionsData = claudeSessions.map { claudeSessionToDict($0) }
+        sessionsData += codexSessions.map { codexSessionToDict($0) }
+        let icons = generateIcons(claudeSessions: claudeSessions, codexSessions: codexSessions)
+        return WebSocketEvent(type: .sessionsList, sessions: sessionsData, icons: icons)
     }
 
     // MARK: - Private
@@ -458,19 +482,19 @@ final class WebSocketManager {
             dict["tty"] = tty
         }
 
-        // Add tmux info if available
-        if let tmuxSession = session.tmuxSession,
-           let tmuxWindow = session.tmuxWindow,
-           let tmuxPane = session.tmuxPane {
+        // Active Codex panes require stable live evidence. Do not fall back to
+        // a pane index from an older process or tmux snapshot.
+        if let stable = CodexObserver.stableTmuxInfo(for: session) {
             let attachCmd = TmuxAttachCommand.buildFull(
-                sessionName: tmuxSession, window: tmuxWindow, pane: tmuxPane, socketPath: session.tmuxSocketPath
+                sessionName: stable.session, window: stable.window, pane: stable.pane, socketPath: stable.socketPath
             )
             dict["tmux"] = [
-                "session": tmuxSession,
-                "window": tmuxWindow,
-                "pane": tmuxPane,
+                "session": stable.session,
+                "window": stable.window,
+                "pane": stable.pane,
+                "pane_id": stable.paneID,
                 "attach_command": attachCmd,
-                "is_attached": TmuxHelper.isSessionAttached(tmuxSession, socketPath: session.tmuxSocketPath)
+                "is_attached": TmuxHelper.isSessionAttached(stable.session, socketPath: stable.socketPath)
             ]
         }
 
