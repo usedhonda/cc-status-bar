@@ -213,6 +213,33 @@ extension SessionStoreGhostCleanupTests {
         }
     }
 
+    func testSeededSessionAdoptsTheResolvedTty() {
+        var data = StoreData(sessions: [:])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "paned")],
+            now: now,
+            ttyResolver: { _ in "/dev/ttys006" }
+        )
+        // Keyed like a hook-created session, so it lands in the tmux section and a later
+        // hook for the same pane updates this row instead of adding a second one.
+        XCTAssertEqual(seeded, ["paned:/dev/ttys006"])
+        XCTAssertEqual(data.sessions["paned:/dev/ttys006"]?.tty, "/dev/ttys006")
+    }
+
+    func testSeedingSurvivesAnUnresolvableTty() {
+        var data = StoreData(sessions: [:])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "detached")],
+            now: now,
+            ttyResolver: { _ in nil }
+        )
+        // Better a session with no pane binding than no session at all.
+        XCTAssertEqual(seeded, ["detached"])
+        XCTAssertNil(data.sessions["detached"]?.tty)
+    }
+
     func testParseClaudeAgentRecordsKeepsKindAndStatus() throws {
         let data = """
         [{"pid": 1, "cwd": "/tmp/a", "sessionId": "a", "kind": "interactive", "status": "busy"}]

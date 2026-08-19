@@ -433,7 +433,12 @@ final class SessionStore {
         var data = loadData()
         // Seed first: a live session the store has never seen must appear, not be treated
         // as a ghost. Cleanup then runs over the reconciled set.
-        let seeded = Self.applyClaudeLiveSessionSeeding(to: &data, liveAgents: liveAgents, now: now)
+        let seeded = Self.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: liveAgents,
+            now: now,
+            ttyResolver: Self.controllingTty(forPid:)
+        )
         var result = Self.applyClaudeGhostCleanup(
             to: &data,
             liveSessionIds: liveSessionIds,
@@ -506,10 +511,15 @@ final class SessionStore {
     /// and reason detail this list cannot provide, and seeding beside it would duplicate
     /// the row. For the same reason a previously seeded, tty-less entry is dropped once a
     /// hook-created entry for that session id appears.
+    /// - Parameter ttyResolver: maps an agent pid to its controlling terminal. Injected so
+    ///   the seeding rules stay testable without a live process table; the caller supplies
+    ///   the real lookup. A seeded session that resolves a tty is keyed and sectioned like
+    ///   a hook-created one, so it appears next to its tmux pane instead of as a stray.
     static func applyClaudeLiveSessionSeeding(
         to data: inout StoreData,
         liveAgents: [ClaudeAgentRecord],
-        now: Date
+        now: Date,
+        ttyResolver: (Int) -> String? = { _ in nil }
     ) -> [String] {
         var seeded: [String] = []
 
@@ -520,10 +530,11 @@ final class SessionStore {
             guard !data.sessions.values.contains(where: { $0.sessionId == sessionId }) else { continue }
 
             let (status, reason) = Self.claudeAgentState(from: agent.status)
+            let tty = agent.pid.flatMap { ttyResolver($0) }
             let session = Session(
                 sessionId: sessionId,
                 cwd: cwd,
-                tty: nil,
+                tty: tty,
                 status: status,
                 createdAt: now,
                 updatedAt: now,
@@ -558,6 +569,29 @@ final class SessionStore {
         default:
             return (.running, nil)
         }
+    }
+
+    /// The controlling terminal of a process, as `/dev/ttysNNN`. Inside tmux this is the
+    /// pane's tty, which is what the rest of the pipeline keys tmux lookups on.
+    static func controllingTty(forPid pid: Int) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-o", "tty=", "-p", String(pid)]
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let name = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty, name != "??" else { return nil }
+        return name.hasPrefix("/dev/") ? name : "/dev/\(name)"
     }
 
     static func parseClaudeAgentRecords(from data: Data) -> [ClaudeAgentRecord]? {
