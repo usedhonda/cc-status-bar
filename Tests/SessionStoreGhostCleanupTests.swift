@@ -240,6 +240,33 @@ extension SessionStoreGhostCleanupTests {
         XCTAssertNil(data.sessions["detached"]?.tty)
     }
 
+    func testAnUnboundSeededSessionIsReboundWhenItsTtyBecomesReadable() {
+        let unbound = makeSession(sessionId: "late", updatedAt: now, tty: nil)
+        var data = StoreData(sessions: [unbound.id: unbound])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "late")],
+            now: now,
+            ttyResolver: { _ in "/dev/ttys009" }
+        )
+        XCTAssertEqual(seeded, ["late:/dev/ttys009"])
+        XCTAssertEqual(data.sessions.count, 1, "rebinding must move the row, not duplicate it")
+        XCTAssertEqual(data.sessions["late:/dev/ttys009"]?.tty, "/dev/ttys009")
+    }
+
+    func testAlreadyBoundSessionsAreLeftAlone() {
+        let bound = makeSession(sessionId: "bound", updatedAt: now, tty: "/dev/ttys001")
+        var data = StoreData(sessions: [bound.id: bound])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "bound")],
+            now: now,
+            ttyResolver: { _ in "/dev/ttys999" }
+        )
+        XCTAssertTrue(seeded.isEmpty, "a hook-bound session must keep the tty the hook reported")
+        XCTAssertEqual(data.sessions["bound:/dev/ttys001"]?.tty, "/dev/ttys001")
+    }
+
     func testParseClaudeAgentRecordsKeepsKindAndStatus() throws {
         let data = """
         [{"pid": 1, "cwd": "/tmp/a", "sessionId": "a", "kind": "interactive", "status": "busy"}]

@@ -527,10 +527,25 @@ final class SessionStore {
             guard agent.kind == nil || agent.kind == "interactive" else { continue }
             guard let sessionId = agent.sessionId, !sessionId.isEmpty else { continue }
             guard let cwd = agent.cwd, !cwd.isEmpty else { continue }
-            guard !data.sessions.values.contains(where: { $0.sessionId == sessionId }) else { continue }
-
             let (status, reason) = Self.claudeAgentState(from: agent.status)
             let tty = agent.pid.flatMap { ttyResolver($0) }
+
+            if let existingKey = data.sessions.first(where: { $0.value.sessionId == sessionId })?.key {
+                // A session seeded while its terminal could not be resolved stays unbound
+                // forever otherwise, and an unbound row cannot reach its tmux pane. Rebind
+                // it the moment a tty becomes readable, keeping everything else intact.
+                guard let tty,
+                      let existing = data.sessions[existingKey],
+                      existing.tty == nil else { continue }
+                var rebound = existing
+                rebound.tty = tty
+                rebound.updatedAt = now
+                data.sessions.removeValue(forKey: existingKey)
+                data.sessions[rebound.id] = rebound
+                seeded.append(rebound.id)
+                continue
+            }
+
             let session = Session(
                 sessionId: sessionId,
                 cwd: cwd,

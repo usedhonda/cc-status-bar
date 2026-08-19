@@ -11,7 +11,7 @@ enum WaitingReason: String, Codable {
 struct Session: Codable, Identifiable, Equatable {
     let sessionId: String
     let cwd: String
-    let tty: String?
+    var tty: String?  // rebindable: a session seeded before its terminal was readable
     var status: SessionStatus
     let createdAt: Date
     var updatedAt: Date
