@@ -4,15 +4,20 @@ struct ClaudeAgentRecord: Decodable {
     let sessionId: String?
     let cwd: String?
     let pid: Int?
+    /// "interactive" for a session a human is attached to, "background" for a subagent.
+    let kind: String?
+    /// The CLI's own view: "busy" while working, "waiting"/"idle" while it needs input.
+    let status: String?
 }
 
 struct ClaudeGhostCleanupResult: Equatable {
     var markedStopped: [String] = []
     var removed: [String] = []
+    var seeded: [String] = []
     var skippedReason: String?
 
     var changed: Bool {
-        !markedStopped.isEmpty || !removed.isEmpty
+        !markedStopped.isEmpty || !removed.isEmpty || !seeded.isEmpty
     }
 }
 
@@ -415,25 +420,34 @@ final class SessionStore {
 
     @discardableResult
     func reconcileClaudeGhostSessions(now: Date = Date()) -> ClaudeGhostCleanupResult {
-        guard let liveSessionIds = Self.fetchLiveClaudeSessionIds() else {
+        guard let liveAgents = Self.fetchLiveClaudeAgents() else {
             DebugLog.log("[SessionStore] Claude ghost cleanup skipped: claude agents unavailable")
             return ClaudeGhostCleanupResult(skippedReason: "claude agents unavailable")
         }
 
+        let liveSessionIds = Set(liveAgents.compactMap { record -> String? in
+            guard let sessionId = record.sessionId, !sessionId.isEmpty else { return nil }
+            return sessionId
+        })
+
         var data = loadData()
-        let result = Self.applyClaudeGhostCleanup(
+        // Seed first: a live session the store has never seen must appear, not be treated
+        // as a ghost. Cleanup then runs over the reconciled set.
+        let seeded = Self.applyClaudeLiveSessionSeeding(to: &data, liveAgents: liveAgents, now: now)
+        var result = Self.applyClaudeGhostCleanup(
             to: &data,
             liveSessionIds: liveSessionIds,
             now: now,
             removalGrace: Self.claudeGhostRemovalGrace
         )
+        result.seeded = seeded
 
         guard result.changed else { return result }
 
         data.updatedAt = now
         saveData(data)
         DebugLog.log(
-            "[SessionStore] Claude ghost cleanup: markedStopped=\(result.markedStopped.count), removed=\(result.removed.count)"
+            "[SessionStore] Claude ghost cleanup: markedStopped=\(result.markedStopped.count), removed=\(result.removed.count), seeded=\(result.seeded.count)"
         )
         return result
     }
@@ -479,6 +493,77 @@ final class SessionStore {
         return result
     }
 
+    /// Sessions the Claude CLI reports as alive but that the store has never heard of.
+    ///
+    /// Hooks are the only way a session normally enters the store, so a session that has
+    /// been quiet since the store last lost it (menu bar app restarted, or the 60-minute
+    /// ghost grace elapsed) stays invisible until it happens to run a tool or end a turn.
+    /// The reconcile pass already knows which sessions are alive; this seeds the missing
+    /// ones instead of using that knowledge only to delete.
+    ///
+    /// A seeded session has no tty yet, so it is keyed by its session id alone. Anything
+    /// already tracking the same session id wins — a hook-created entry carries tty, tmux
+    /// and reason detail this list cannot provide, and seeding beside it would duplicate
+    /// the row. For the same reason a previously seeded, tty-less entry is dropped once a
+    /// hook-created entry for that session id appears.
+    static func applyClaudeLiveSessionSeeding(
+        to data: inout StoreData,
+        liveAgents: [ClaudeAgentRecord],
+        now: Date
+    ) -> [String] {
+        var seeded: [String] = []
+
+        for agent in liveAgents {
+            guard agent.kind == nil || agent.kind == "interactive" else { continue }
+            guard let sessionId = agent.sessionId, !sessionId.isEmpty else { continue }
+            guard let cwd = agent.cwd, !cwd.isEmpty else { continue }
+            guard !data.sessions.values.contains(where: { $0.sessionId == sessionId }) else { continue }
+
+            let (status, reason) = Self.claudeAgentState(from: agent.status)
+            let session = Session(
+                sessionId: sessionId,
+                cwd: cwd,
+                tty: nil,
+                status: status,
+                createdAt: now,
+                updatedAt: now,
+                waitingReason: reason
+            )
+            data.sessions[session.id] = session
+            seeded.append(session.id)
+        }
+
+        // A hook-created entry supersedes an earlier seeded one for the same session.
+        let ttyBackedIds = Set(data.sessions.values.compactMap { $0.tty == nil ? nil : $0.sessionId })
+        for (key, session) in data.sessions
+        where session.tty == nil && ttyBackedIds.contains(session.sessionId) {
+            data.sessions.removeValue(forKey: key)
+            seeded.removeAll { $0 == key }
+        }
+
+        return seeded
+    }
+
+    /// Maps the CLI's own status vocabulary onto the store's. "idle" and "waiting" both
+    /// mean the session is not working and needs its human, which is what waiting_input
+    /// already means for every hook-driven session; nothing here claims a session finished.
+    static func claudeAgentState(from status: String?) -> (SessionStatus, WaitingReason?) {
+        switch status {
+        case "busy":
+            return (.running, nil)
+        case "idle":
+            return (.waitingInput, .idle)
+        case "waiting":
+            return (.waitingInput, .unknown)
+        default:
+            return (.running, nil)
+        }
+    }
+
+    static func parseClaudeAgentRecords(from data: Data) -> [ClaudeAgentRecord]? {
+        try? JSONDecoder().decode([ClaudeAgentRecord].self, from: data)
+    }
+
     static func parseClaudeAgentSessionIds(from data: Data) -> Set<String>? {
         guard let agents = try? JSONDecoder().decode([ClaudeAgentRecord].self, from: data) else {
             return nil
@@ -491,7 +576,7 @@ final class SessionStore {
 
     // MARK: - Private
 
-    private static func fetchLiveClaudeSessionIds() -> Set<String>? {
+    private static func fetchLiveClaudeAgents() -> [ClaudeAgentRecord]? {
         let (executable, arguments) = claudeAgentsCommand()
         let process = Process()
         process.executableURL = executable
@@ -529,11 +614,11 @@ final class SessionStore {
         }
 
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        guard let sessionIds = parseClaudeAgentSessionIds(from: data) else {
+        guard let records = parseClaudeAgentRecords(from: data) else {
             DebugLog.log("[SessionStore] Failed to parse claude agents output")
             return nil
         }
-        return sessionIds
+        return records
     }
 
     private static func claudeAgentsCommand() -> (URL, [String]) {

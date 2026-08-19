@@ -137,3 +137,88 @@ final class SessionStoreGhostCleanupTests: XCTestCase {
         XCTAssertTrue(data.sessions.isEmpty)
     }
 }
+
+// MARK: - Live session seeding
+
+extension SessionStoreGhostCleanupTests {
+    private func agent(
+        sessionId: String,
+        cwd: String? = nil,
+        kind: String? = "interactive",
+        status: String? = "idle"
+    ) -> ClaudeAgentRecord {
+        ClaudeAgentRecord(
+            sessionId: sessionId,
+            cwd: cwd ?? "/tmp/\(sessionId)",
+            pid: 1,
+            kind: kind,
+            status: status
+        )
+    }
+
+    func testLiveSessionMissingFromStoreIsSeeded() {
+        var data = StoreData(sessions: [:])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "unseen")],
+            now: now
+        )
+        XCTAssertEqual(seeded, ["unseen"])
+        XCTAssertEqual(data.sessions["unseen"]?.sessionId, "unseen")
+    }
+
+    func testSeedingNeverDuplicatesAKnownSession() {
+        // The hook-created entry is keyed with its tty; seeding must not add a second row.
+        let known = makeSession(sessionId: "known", updatedAt: now, tty: "/dev/ttys001")
+        var data = StoreData(sessions: [known.id: known])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "known")],
+            now: now
+        )
+        XCTAssertTrue(seeded.isEmpty)
+        XCTAssertEqual(data.sessions.count, 1)
+    }
+
+    func testBackgroundAgentsAreNotSeeded() {
+        var data = StoreData(sessions: [:])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "sub", kind: "background")],
+            now: now
+        )
+        XCTAssertTrue(seeded.isEmpty)
+        XCTAssertTrue(data.sessions.isEmpty)
+    }
+
+    func testHookEntrySupersedesAnEarlierSeededEntry() {
+        let seededEarlier = makeSession(sessionId: "dup", updatedAt: now, tty: nil)
+        let fromHook = makeSession(sessionId: "dup", updatedAt: now, tty: "/dev/ttys002")
+        var data = StoreData(sessions: [seededEarlier.id: seededEarlier, fromHook.id: fromHook])
+        _ = SessionStore.applyClaudeLiveSessionSeeding(to: &data, liveAgents: [], now: now)
+        XCTAssertEqual(data.sessions.count, 1)
+        XCTAssertNotNil(data.sessions[fromHook.id])
+    }
+
+    func testSeededStateFollowsTheCLIVocabulary() {
+        XCTAssertEqual(SessionStore.claudeAgentState(from: "busy").0, .running)
+        XCTAssertEqual(SessionStore.claudeAgentState(from: "idle").0, .waitingInput)
+        XCTAssertEqual(SessionStore.claudeAgentState(from: "idle").1, .idle)
+        XCTAssertEqual(SessionStore.claudeAgentState(from: "waiting").0, .waitingInput)
+        // GUARD: a seeded session must never be reported as finished — the CLI list cannot
+        // tell "done" from "waiting for you", and inventing completion is the bug this
+        // whole status surface has been fighting.
+        for status in ["busy", "idle", "waiting", "unknown-future-value", nil] {
+            XCTAssertNotEqual(SessionStore.claudeAgentState(from: status).0, .stopped)
+        }
+    }
+
+    func testParseClaudeAgentRecordsKeepsKindAndStatus() throws {
+        let data = """
+        [{"pid": 1, "cwd": "/tmp/a", "sessionId": "a", "kind": "interactive", "status": "busy"}]
+        """.data(using: .utf8)!
+        let records = try XCTUnwrap(SessionStore.parseClaudeAgentRecords(from: data))
+        XCTAssertEqual(records.first?.kind, "interactive")
+        XCTAssertEqual(records.first?.status, "busy")
+    }
+}
