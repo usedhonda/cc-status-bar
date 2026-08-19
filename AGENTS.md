@@ -1,49 +1,55 @@
-## Dev Build & Reload
+## Local Development Deployment
 
-**重要: ad-hoc 署名 (`--sign -`) は絶対に使わない。TCC 権限（Accessibility, Input Monitoring）が壊れて CGEventTap 等が機能しなくなる。**
+`scripts/dev-deploy.sh` is the only supported local CCStatusBar deployment
+entrypoint for every agent and developer.
 
 ```bash
-# 1. ビルド
+# Read-only preflight; no build, copy, signing, restart, or TCC mutation.
+./scripts/dev-deploy.sh --check
+
+# Release-config build, staged bundle signing, one bounded restart, and health check.
+./scripts/dev-deploy.sh
+```
+
+The entrypoint selects signing deterministically:
+
+1. Use `CCSB_DEV_SIGNING_IDENTITY` when that non-secret identity name is
+   available.
+2. Otherwise preserve the installed app's Developer ID class when its matching
+   identity is available.
+3. Otherwise use ad-hoc signing so missing Developer ID certificates do not
+   block local development.
+
+Ad-hoc signing may cause macOS TCC permissions (Accessibility or Input
+Monitoring) not to follow the previous build. The script warns about this and
+never changes TCC state. It preserves the bundle identifier and entitlements,
+stages and verifies the bundle before stopping the app, and restores the prior
+bundle if launch health fails. It never reads release credentials, notarizes,
+uploads, or performs release work.
+
+Do not run manual `swift build`, bundle-copy, `codesign`, `pkill`, or `open`
+sequences for local deployment. Use `--check` first when diagnosing a machine.
+
+## Mandatory After Runtime Code Changes
+
+After a runtime code change, run the canonical local deployment entrypoint and
+include its process/port result in the report:
+
+```bash
+./scripts/dev-deploy.sh --check
+./scripts/dev-deploy.sh
+```
+
+Run focused tests during iteration. The broad test/build gate is:
+
+```bash
+swift test -Xswiftc -warnings-as-errors
 swift build
-
-# 2. バイナリコピー + Developer ID 署名 + リランチ
-pkill -x CCStatusBar; sleep 0.5
-cp .build/debug/CCStatusBar CCStatusBar.app/Contents/MacOS/
-codesign --force --deep --sign "Developer ID Application: Yuzuru Honda (F588423ZWS)" CCStatusBar.app
-open CCStatusBar.app
 ```
 
-- Developer ID 署名なら TCC 権限がリビルドで壊れない
-- release.sh はリリース用（notarize含む）。開発中は上記手順で十分
+## Release Boundary
 
-### Mandatory After Every Runtime Code Change
-
-実装後に「指示されなくても」以下を必ず実施する（省略禁止）:
-
-```bash
-# A. Build + reload
-swift build
-pkill -x CCStatusBar; sleep 0.5
-cp .build/debug/CCStatusBar CCStatusBar.app/Contents/MacOS/
-codesign --force --deep --sign "Developer ID Application: Yuzuru Honda (F588423ZWS)" CCStatusBar.app
-open CCStatusBar.app
-
-# B. Process verification
-pgrep -lf CCStatusBar | head
-```
-
-完了報告には、最低限 `swift test` の pass/fail と起動プロセス確認結果を含めること。
-
-## Release
-
-リリースは `scripts/release.sh` で一発実行。手作業で個別コマンドを叩かない。
-
-```bash
-# ビルド＆公証のみ（ローカル確認用）
-./scripts/release.sh
-
-# ビルド＆公証＆GitHub Release 作成
-./scripts/release.sh --publish
-```
-
-スクリプトが自動でやること: テスト → release ビルド → 署名 → DMG → 公証 → staple → Stream Deck plugin → GitHub Release
+Release and notarization are a separate credential-bearing lane. Do not use
+that lane for local development, and do not copy its credentials into this
+repository or into agent instructions. Credential cleanup and rotation for
+that lane is a separate P0 security task and is out of scope here.

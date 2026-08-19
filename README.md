@@ -267,32 +267,32 @@ The app automatically configures Claude Code hooks on first launch — no manual
 > **Note**: The app is notarized by Apple, so it opens without Gatekeeper warnings.
 
 ### From Source
-```bash
-# Build
-swift build
 
-# Copy to .app bundle
-cp .build/debug/CCStatusBar CCStatusBar.app/Contents/MacOS/
-
-# Code sign (ad-hoc)
-codesign --force --deep --sign - CCStatusBar.app
-
-# Launch
-open CCStatusBar.app
-```
-
-### Build Dev App (CCStatusBarDev.app)
-Build a side-by-side development app with separate bundle ID (`com.ccstatusbar.dev`):
+Local development deployment is intentionally centralized. Both CC and Cdx
+must use the same entrypoint:
 
 ```bash
-./scripts/build-dev-app.sh
-open CCStatusBarDev.app
+# Read-only preflight
+./scripts/dev-deploy.sh --check
+
+# Build, stage, sign, launch once, and verify process/port health
+./scripts/dev-deploy.sh
 ```
 
-This dev variant uses separate paths/settings from production:
-- `~/Library/Application Support/CCStatusBarDev`
-- UserDefaults suite: `com.ccstatusbar.dev`
-- Hook command name: `CCStatusBarDev`
+The script prefers the optional non-secret `CCSB_DEV_SIGNING_IDENTITY`, then
+preserves a matching Developer ID class from the installed app, and finally
+falls back to ad-hoc signing when Developer ID is unavailable. Ad-hoc signing
+may require Accessibility or Input Monitoring permission to be granted again;
+the script warns about this and does not change TCC. The bundle identifier and
+entitlements are checked before the app is installed. A failed launch health
+check restores the previous bundle.
+
+Do not use manual build/copy/sign/restart commands for local deployment. The
+release and notarization lane is separate and credential-bearing; it is not a
+local development prerequisite. Credential cleanup and rotation for that lane
+is a separate P0 security task.
+
+The canonical local app keeps the production bundle identifier and settings.
 
 ## Permissions
 
