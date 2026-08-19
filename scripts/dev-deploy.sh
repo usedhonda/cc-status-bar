@@ -274,6 +274,21 @@ port_health_is_ok() {
     [[ -n "$ports" ]]
 }
 
+# The web server binds a moment after the process appears, so checking the port the
+# instant the process exists reports a healthy launch as broken and triggers a rollback.
+# Bounded the same way as wait_for_process; returns immediately when the server is off.
+wait_for_port_health() {
+    local attempt=1
+    while (( attempt <= 40 )); do
+        if port_health_is_ok; then
+            return 0
+        fi
+        sleep 0.25
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 cleanup_backup() {
     local temp_root="${TMPDIR:-/tmp}"
     if [[ -n "$BACKUP_ROOT" && "$BACKUP_ROOT" == "$temp_root"/ccstatusbar-dev-deploy.* ]]; then
@@ -394,7 +409,7 @@ deploy() {
 
     printf 'launch: one bounded restart (previously_running=%s)\n' "$was_running"
     open "$APP_PATH"
-    if wait_for_process && port_health_is_ok; then
+    if wait_for_process && wait_for_port_health; then
         printf 'process_health: PASS\n'
         print_port_state
         SWAP_DONE=0
@@ -404,6 +419,17 @@ deploy() {
 
     warn "launch health failed; restoring the previous app bundle."
     rollback_app
+    # A failed deploy must not leave the machine without the menu bar app: the restored
+    # bundle is the one that was serving a moment ago, so bring it back up rather than
+    # ending on an outage the operator has to notice and repair by hand.
+    if (( was_running == 1 )); then
+        open "$APP_PATH" || warn "could not relaunch the restored app bundle"
+        if wait_for_process && wait_for_port_health; then
+            printf 'deploy_result: FAIL (original app restored and relaunched)\n' >&2
+            return 1
+        fi
+        warn "restored app bundle did not come back up; start it manually"
+    fi
     printf 'deploy_result: FAIL (original app restored; previous process was not relaunched)\n' >&2
     return 1
 }

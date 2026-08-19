@@ -150,4 +150,12 @@ printf '%s' '<?xml version="1.0"?><plist version="1.0"><dict><key>com.apple.secu
 [[ "$(entitlement_value "$FIXTURE_ROOT/absent.plist")" == "false" ]] \
     || fail "an absent sandbox key must read as false"
 
-printf 'PASS: dev-deploy syntax, guard tripwires, staging directory guard, entitlement reader, and read-only check fixtures\n'
+# Launch health must wait for the port, not sample it the instant the process appears:
+# the server binds a moment later, and an immediate sample rolled back healthy deploys.
+rg -q 'wait_for_process && wait_for_port_health' "$SCRIPT" \
+    || fail "launch health does not wait for the port to come up"
+# A failed deploy must not end on an outage.
+rg -q 'original app restored and relaunched' "$SCRIPT" \
+    || fail "rollback does not relaunch the restored bundle"
+
+printf 'PASS: dev-deploy syntax, guard tripwires, staging directory guard, entitlement reader, launch-health waits, and read-only check fixtures\n'
