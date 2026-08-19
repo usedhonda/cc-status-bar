@@ -347,6 +347,11 @@ deploy() {
     STAGED_APP="$BACKUP_ROOT/staged.app"
     ditto "$APP_PATH" "$ORIGINAL_INSTALLED_APP"
     ditto "$APP_PATH" "$STAGED_APP"
+    # The tracked bundle carries only Info.plist and Resources; the executable is a
+    # build product, and git cannot track the empty Contents/MacOS directory that
+    # holds it. Create the directory instead of assuming the staged copy already has
+    # one, otherwise a freshly cloned checkout dies here before signing.
+    mkdir -p "$STAGED_APP/Contents/MacOS"
     cp "$binary_path" "$STAGED_APP/Contents/MacOS/CCStatusBar"
 
     codesign --force --deep --entitlements "$ENTITLEMENTS_PATH" --sign "$SIGNER" "$STAGED_APP"

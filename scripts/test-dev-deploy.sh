@@ -11,6 +11,13 @@ fail() {
     exit 1
 }
 
+# The assertions below are written against ripgrep. Fall back to grep -E where it is
+# not installed so the harness stays runnable on a plain machine; every call passes
+# explicit files, so the two behave the same here.
+if ! command -v rg >/dev/null 2>&1; then
+    rg() { grep -E "$@"; }
+fi
+
 bash -n "$SCRIPT" || fail "dev-deploy.sh has shell syntax errors"
 if command -v shellcheck >/dev/null 2>&1; then
     shellcheck "$SCRIPT" || fail "shellcheck rejected dev-deploy.sh"
@@ -104,4 +111,25 @@ printf '%s\n' "$output" | rg -q '^port_state: listening' || fail "port fixture n
 printf '%s\n' "$output" | rg -q '^check_result: PASS$' || fail "check fixture did not pass"
 [[ "$before" == "$after" ]] || fail "--check changed the fixture"
 
-printf 'PASS: dev-deploy syntax, guard tripwires, and read-only check fixture\n'
+# The staged bundle must have its Contents/MacOS created, not assumed: git tracks only
+# Info.plist and Resources, so a fresh clone has no executable directory and the copy
+# would die before signing.
+rg -q 'mkdir -p "\$STAGED_APP/Contents/MacOS"' "$SCRIPT" \
+    || fail "staging does not create the app bundle MacOS directory"
+
+# Same condition, exercised: a bundle shaped the way git actually delivers it (no
+# Contents/MacOS, no executable) must still pass the read-only check.
+GIT_SHAPED_APP="$FIXTURE_ROOT/GitShaped.app"
+mkdir -p "$GIT_SHAPED_APP/Contents/Resources"
+cp "$ROOT_DIR/CCStatusBar.app/Contents/Info.plist" "$GIT_SHAPED_APP/Contents/Info.plist"
+[[ ! -d "$GIT_SHAPED_APP/Contents/MacOS" ]] || fail "git-shaped fixture must not have Contents/MacOS"
+git_shaped_output="$(
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    CCSB_DEV_DEPLOY_APP_PATH="$GIT_SHAPED_APP" \
+    CCSB_DEV_SIGNING_IDENTITY='Developer ID Application: Fixture (TEAM)' \
+    "$SCRIPT" --check
+)"
+printf '%s\n' "$git_shaped_output" | rg -q '^check_result: PASS$' \
+    || fail "check rejected a bundle without a tracked executable directory"
+
+printf 'PASS: dev-deploy syntax, guard tripwires, staging directory guard, and read-only check fixtures\n'
