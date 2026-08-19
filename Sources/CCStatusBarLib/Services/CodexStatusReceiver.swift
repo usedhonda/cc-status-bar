@@ -92,6 +92,7 @@ final class CodexStatusReceiver: ObservableObject {
         let paneCapture = capturePane(for: codexSession)
         let waitingDetection = Self.detectWaitingInput(from: json, paneCapture: paneCapture)
         let waitingReason = waitingDetection.reason
+        let stateSource = Self.stateSource(for: waitingDetection.source)
 
         statusByCwd[cwd] = CodexSessionStatus(
             status: .waitingInput,
@@ -100,7 +101,8 @@ final class CodexStatusReceiver: ObservableObject {
             threadId: threadId,
             lastSeenAt: now,
             stoppedAt: nil,
-            isSyntheticStopped: false
+            isSyntheticStopped: false,
+            stateSource: stateSource
         )
 
         // Clear acknowledge on new waiting event so it shows as yellow/red again
@@ -184,7 +186,8 @@ final class CodexStatusReceiver: ObservableObject {
             threadId: threadId,
             lastSeenAt: now,
             stoppedAt: nil,
-            isSyntheticStopped: false
+            isSyntheticStopped: false,
+            stateSource: .webhook
         )
 
         // In hooks mode, register session in CodexHooksSessionStore
@@ -221,7 +224,8 @@ final class CodexStatusReceiver: ObservableObject {
                 threadId: json["session_id"] as? String,
                 lastSeenAt: now,
                 stoppedAt: nil,
-                isSyntheticStopped: false
+                isSyntheticStopped: false,
+                stateSource: .webhook
             )
         }
 
@@ -324,6 +328,7 @@ final class CodexStatusReceiver: ObservableObject {
                     tracked.stoppedAt = nil
                     tracked.isSyntheticStopped = false
                     tracked.lastEventAt = now
+                    tracked.stateSource = .paneGuess
                     // Clear autofocus and alert cooldowns when Codex session returns to running
                     let codexId = "codex:\(activeSessions.first { $0.cwd == cwd }?.pid ?? 0)"
                     AutofocusManager.shared.clearCooldown(sessionId: codexId)
@@ -340,6 +345,7 @@ final class CodexStatusReceiver: ObservableObject {
                                 // Transitioned to idle — task completed
                                 tracked.waitingReason = .idle
                                 tracked.lastEventAt = now
+                                tracked.stateSource = .paneGuess
                                 lastPaneCapture[cwd] = Self.hashPaneTail(currentCapture)
                                 DebugLog.log("[CodexStatusReceiver] Waiting transitioned to idle: \(cwd)")
                                 // Fire alert + autofocus for task completion
@@ -381,6 +387,7 @@ final class CodexStatusReceiver: ObservableObject {
                                 // Transitioned from question/permission to idle (task completed)
                                 tracked.waitingReason = .idle
                                 tracked.lastEventAt = now
+                                tracked.stateSource = .paneGuess
                                 lastPaneCapture[cwd] = currentHash
                                 DebugLog.log("[CodexStatusReceiver] Waiting transitioned to idle: \(cwd)")
                                 // Fire alert + autofocus for task completion
@@ -402,6 +409,7 @@ final class CodexStatusReceiver: ObservableObject {
                                 tracked.status = .running
                                 tracked.waitingReason = nil
                                 tracked.lastEventAt = now
+                                tracked.stateSource = .paneGuess
                                 lastPaneCapture.removeValue(forKey: cwd)
                                 acknowledgedCwds.remove(cwd)
                                 DebugLog.log("[CodexStatusReceiver] Waiting markers disappeared, recovering to running: \(cwd)")
@@ -421,6 +429,7 @@ final class CodexStatusReceiver: ObservableObject {
                         tracked.status = .waitingInput
                         tracked.waitingReason = detection.reason
                         tracked.lastEventAt = now
+                        tracked.stateSource = .paneGuess
                         lastPaneCapture[cwd] = Self.hashPaneTail(currentCapture)
                         acknowledgedCwds.remove(cwd)
                         DebugLog.log("[CodexStatusReceiver] Poll detected waiting: \(cwd) reason=\(detection.reason.rawValue) source=poll_\(detection.source)")
@@ -449,7 +458,8 @@ final class CodexStatusReceiver: ObservableObject {
                     threadId: nil,
                     lastSeenAt: now,
                     stoppedAt: nil,
-                    isSyntheticStopped: false
+                    isSyntheticStopped: false,
+                    stateSource: .paneGuess
                 )
             }
         }
@@ -463,6 +473,7 @@ final class CodexStatusReceiver: ObservableObject {
                 tracked.waitingReason = nil
                 tracked.stoppedAt = now
                 tracked.isSyntheticStopped = true
+                tracked.stateSource = .paneGuess
                 statusByCwd[cwd] = tracked
                 DebugLog.log("[CodexStatusReceiver] Synthetic stopped: \(cwd)")
             }
@@ -554,6 +565,10 @@ final class CodexStatusReceiver: ObservableObject {
         }
 
         return (.stop, "default")
+    }
+
+    static func stateSource(for detectionSource: String) -> SessionStateSource {
+        detectionSource == "default" || detectionSource == "notify" ? .webhook : .paneGuess
     }
 
     static func isLikelyWaitingScreen(_ paneCapture: String?, waitingReason: CodexWaitingReason?) -> Bool {
@@ -664,4 +679,5 @@ struct CodexSessionStatus {
     var lastSeenAt: Date
     var stoppedAt: Date?
     var isSyntheticStopped: Bool
+    var stateSource: SessionStateSource
 }

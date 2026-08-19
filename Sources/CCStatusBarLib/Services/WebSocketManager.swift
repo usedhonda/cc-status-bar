@@ -202,7 +202,7 @@ final class WebSocketManager {
                     if session != previous {
                         let event = WebSocketEvent(
                             type: .sessionUpdated,
-                            session: buildUpdatedSessionDict(current: session, previous: previous)
+                            session: Self.buildUpdatedSessionDict(current: session, previous: previous)
                         )
                         broadcast(event: event)
                     }
@@ -222,7 +222,7 @@ final class WebSocketManager {
 
                 let event = WebSocketEvent(
                     type: .sessionAdded,
-                    session: buildAddedSessionDict(session),
+                    session: Self.buildAddedSessionDict(session),
                     icon: icon
                 )
                 broadcast(event: event)
@@ -242,7 +242,7 @@ final class WebSocketManager {
             if let previous = previousSessions[session.id], session != previous {
                 let event = WebSocketEvent(
                     type: .sessionUpdated,
-                    session: buildUpdatedSessionDict(current: session, previous: previous)
+                    session: Self.buildUpdatedSessionDict(current: session, previous: previous)
                 )
                 broadcast(event: event)
             }
@@ -310,8 +310,8 @@ final class WebSocketManager {
         previousCodexIDs = currentCodexIDs
     }
 
-    private func buildUpdatedSessionDict(current: Session, previous: Session) -> [String: Any] {
-        var dict = claudeSessionToDict(current)
+    static func buildUpdatedSessionDict(current: Session, previous: Session, observedAt: Date = Date()) -> [String: Any] {
+        var dict = makeClaudeSessionPayload(current, observedAt: observedAt)
         // Attach pane capture on waiting_input transition
         if previous.status == .running && current.status == .waitingInput {
             if let tty = current.tty, let paneInfo = TmuxHelper.getRemoteAccessInfo(for: tty) {
@@ -324,8 +324,8 @@ final class WebSocketManager {
         return dict
     }
 
-    private func buildAddedSessionDict(_ session: Session) -> [String: Any] {
-        var dict = claudeSessionToDict(session)
+    static func buildAddedSessionDict(_ session: Session, observedAt: Date = Date()) -> [String: Any] {
+        var dict = makeClaudeSessionPayload(session, observedAt: observedAt)
         // Also include pane capture on initial waiting_input add.
         if session.status == .waitingInput,
            let tty = session.tty,
@@ -363,7 +363,11 @@ final class WebSocketManager {
     }
 
     /// Convert Claude Code session to dictionary for WebSocket output
-    private func claudeSessionToDict(_ session: Session) -> [String: Any] {
+    private func claudeSessionToDict(_ session: Session, observedAt: Date = Date()) -> [String: Any] {
+        Self.makeClaudeSessionPayload(session, observedAt: observedAt)
+    }
+
+    static func makeClaudeSessionPayload(_ session: Session, observedAt: Date = Date()) -> [String: Any] {
         var dict: [String: Any] = [
             "type": "claude_code",
             "id": session.id,
@@ -376,6 +380,17 @@ final class WebSocketManager {
             "attention_level": attentionLevel(for: session),
             "terminal": session.environmentLabel
         ]
+
+        let normalized = SessionStateNormalizer.normalize(SessionNormalizationInput(
+            producer: .claude,
+            status: session.status.rawValue,
+            waitingReason: session.waitingReason?.rawValue,
+            stateSource: .hook,
+            syntheticStopped: false,
+            observedAt: observedAt,
+            lastActivityAt: session.updatedAt
+        ))
+        dict.merge(normalized.fields) { _, newValue in newValue }
 
         if let tty = session.tty {
             dict["tty"] = tty
@@ -416,10 +431,11 @@ final class WebSocketManager {
 
     /// Convert Codex session to dictionary for WebSocket output
     /// This method is called from CodexStatusReceiver, so it must be accessible
-    func codexSessionToDict(_ session: CodexSession) -> [String: Any] {
+    func codexSessionToDict(_ session: CodexSession, observedAt: Date = Date()) -> [String: Any] {
         // Get status from CodexStatusReceiver
-        let status = CodexStatusReceiver.shared.getStatus(for: session.cwd)
-        let waitingReason = CodexStatusReceiver.shared.getWaitingReason(for: session.cwd)
+        let statusInfo = CodexStatusReceiver.shared.getSessionStatus(for: session.cwd)
+        let status = statusInfo?.status ?? .running
+        let waitingReason = statusInfo?.status == .waitingInput ? (statusInfo?.waitingReason ?? .unknown) : nil
         let attentionLevel: Int
         if status == .waitingInput {
             if waitingReason == .idle {
@@ -447,6 +463,23 @@ final class WebSocketManager {
             "attention_level": attentionLevel,
             "terminal": terminalName
         ]
+
+        let stateSource = statusInfo?.stateSource ?? .paneGuess
+        let normalized = SessionStateNormalizer.normalize(SessionNormalizationInput(
+            producer: .codex,
+            status: status.rawValue,
+            waitingReason: waitingReason?.rawValue,
+            stateSource: stateSource,
+            syntheticStopped: statusInfo?.isSyntheticStopped ?? false,
+            observedAt: observedAt,
+            lastActivityAt: stateSource == .paneGuess ? nil : statusInfo?.lastEventAt
+        ))
+        dict.merge(normalized.fields) { _, newValue in newValue }
+
+        if let statusInfo {
+            dict["updated_at"] = ISO8601DateFormatter().string(from: statusInfo.lastEventAt)
+            dict["last_seen_at"] = ISO8601DateFormatter().string(from: statusInfo.lastSeenAt)
+        }
 
         if let sessionId = session.sessionId {
             dict["session_id"] = sessionId
@@ -537,7 +570,7 @@ final class WebSocketManager {
     }
 
     /// Compute attention level: 0=green, 1=yellow, 2=red
-    private func attentionLevel(for session: Session) -> Int {
+    private static func attentionLevel(for session: Session) -> Int {
         if session.status == .running || session.isAcknowledged == true {
             return 0  // green
         }
