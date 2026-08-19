@@ -132,4 +132,22 @@ git_shaped_output="$(
 printf '%s\n' "$git_shaped_output" | rg -q '^check_result: PASS$' \
     || fail "check rejected a bundle without a tracked executable directory"
 
-printf 'PASS: dev-deploy syntax, guard tripwires, staging directory guard, and read-only check fixtures\n'
+# The sandbox-entitlement gate compares a value read from two plists, and requires it to
+# be non-empty. plutil -extract ... raw cannot read booleans on current macOS, which made
+# every read empty and the gate unpassable; these cases pin the reader's behaviour.
+ENTITLEMENT_READER="$FIXTURE_ROOT/entitlement_value.sh"
+sed -n '/^entitlement_value() {/,/^}/p' "$SCRIPT" > "$ENTITLEMENT_READER"
+# shellcheck disable=SC1090
+source "$ENTITLEMENT_READER"
+
+TRUE_PLIST="$FIXTURE_ROOT/sandboxed.plist"
+printf '%s' '<?xml version="1.0"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>' > "$TRUE_PLIST"
+
+[[ "$(entitlement_value "$ROOT_DIR/CCStatusBar.entitlements")" == "false" ]] \
+    || fail "a sandbox=false entitlements file must read as false, not empty"
+[[ "$(entitlement_value "$TRUE_PLIST")" == "true" ]] \
+    || fail "a sandbox=true entitlements file must read as true"
+[[ "$(entitlement_value "$FIXTURE_ROOT/absent.plist")" == "false" ]] \
+    || fail "an absent sandbox key must read as false"
+
+printf 'PASS: dev-deploy syntax, guard tripwires, staging directory guard, entitlement reader, and read-only check fixtures\n'

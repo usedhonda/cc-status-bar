@@ -108,7 +108,19 @@ bundle_identifier() {
 
 entitlement_value() {
     local plist_path="$1"
-    plutil -extract com.apple.security.app-sandbox raw -o - "$plist_path" 2>/dev/null || true
+    local value
+    # plutil -extract ... raw reports "no value at that key path" both for an absent key
+    # and for a boolean false, so a not-sandboxed app reads back as an empty string. The
+    # caller needs the two to compare equal and to be non-empty, so normalise to an
+    # explicit true/false: absent and false both mean "not sandboxed".
+    # plutil -extract ... raw cannot read a boolean at all on current macOS (it reports
+    # "no value at that key path" for both true and false), so a sandbox entitlement read
+    # that way always came back empty. PlistBuddy prints booleans faithfully.
+    value="$(/usr/libexec/PlistBuddy -c "Print :com.apple.security.app-sandbox" "$plist_path" 2>/dev/null)" || value=""
+    case "$value" in
+        true|1|YES) printf 'true\n' ;;
+        *) printf 'false\n' ;;
+    esac
 }
 
 web_server_preference() {
