@@ -531,12 +531,14 @@ final class SessionStore {
             let tty = agent.pid.flatMap { ttyResolver($0) }
 
             if let existingKey = data.sessions.first(where: { $0.value.sessionId == sessionId })?.key {
-                // A session seeded while its terminal could not be resolved stays unbound
-                // forever otherwise, and an unbound row cannot reach its tmux pane. Rebind
-                // it the moment a tty becomes readable, keeping everything else intact.
+                // Two ways a row ends up pointing at the wrong terminal: it was seeded
+                // before its tty could be read, or the session was restarted into a
+                // different pane and the store still holds the tty an old hook reported.
+                // Either way the row cannot reach its pane. The process table says where
+                // the process is right now, so it wins over a remembered binding.
                 guard let tty,
                       let existing = data.sessions[existingKey],
-                      existing.tty == nil else { continue }
+                      existing.tty != tty else { continue }
                 var rebound = existing
                 rebound.tty = tty
                 rebound.updatedAt = now

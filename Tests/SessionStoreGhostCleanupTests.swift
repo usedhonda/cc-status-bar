@@ -254,16 +254,32 @@ extension SessionStoreGhostCleanupTests {
         XCTAssertEqual(data.sessions["late:/dev/ttys009"]?.tty, "/dev/ttys009")
     }
 
-    func testAlreadyBoundSessionsAreLeftAlone() {
+    func testAStaleTerminalBindingIsCorrected() {
+        // A session restarted into another pane keeps the old hook's tty, and a row
+        // pointing at a pane the session left can never be reached from the phone.
+        let moved = makeSession(sessionId: "moved", updatedAt: now, tty: "/dev/ttys001")
+        var data = StoreData(sessions: [moved.id: moved])
+        let seeded = SessionStore.applyClaudeLiveSessionSeeding(
+            to: &data,
+            liveAgents: [agent(sessionId: "moved")],
+            now: now,
+            ttyResolver: { _ in "/dev/ttys006" }
+        )
+        XCTAssertEqual(seeded, ["moved:/dev/ttys006"])
+        XCTAssertEqual(data.sessions.count, 1, "correcting a binding must move the row, not duplicate it")
+        XCTAssertNil(data.sessions["moved:/dev/ttys001"])
+    }
+
+    func testAnUnreadableTerminalLeavesTheExistingBindingAlone() {
         let bound = makeSession(sessionId: "bound", updatedAt: now, tty: "/dev/ttys001")
         var data = StoreData(sessions: [bound.id: bound])
         let seeded = SessionStore.applyClaudeLiveSessionSeeding(
             to: &data,
             liveAgents: [agent(sessionId: "bound")],
             now: now,
-            ttyResolver: { _ in "/dev/ttys999" }
+            ttyResolver: { _ in nil }
         )
-        XCTAssertTrue(seeded.isEmpty, "a hook-bound session must keep the tty the hook reported")
+        XCTAssertTrue(seeded.isEmpty, "a failed lookup must not erase a working binding")
         XCTAssertEqual(data.sessions["bound:/dev/ttys001"]?.tty, "/dev/ttys001")
     }
 
