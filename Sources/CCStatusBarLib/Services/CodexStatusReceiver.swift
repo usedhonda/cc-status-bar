@@ -637,8 +637,7 @@ private enum CodexQuestionSignalDetector {
     /// Only check the last 15 lines to avoid matching stale question markers in scrollback.
     static func isHighConfidenceQuestionPrompt(paneCapture: String?) -> Bool {
         guard let paneCapture, !paneCapture.isEmpty else { return false }
-        let lines = paneCapture.components(separatedBy: .newlines)
-        let tail = lines.suffix(15).joined(separator: "\n")
+        let tail = codexPaneTail(paneCapture, 15).joined(separator: "\n")
         let normalized = tail
             .lowercased()
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -652,6 +651,20 @@ private enum CodexQuestionSignalDetector {
 
         return hasQuestionCounter && (hasSubmitHint || hasUnanswered || hasNotesHint)
     }
+}
+
+/// Last `count` non-blank-terminated lines of a pane capture.
+///
+/// `tmux capture-pane -p` ends its output with a newline, and a pane whose
+/// content is shorter than its height is padded with blank lines, so a plain
+/// `suffix(n)` spends its budget on emptiness and pushes the real last line —
+/// the Codex composer — out of a small window.
+private func codexPaneTail(_ capture: String, _ count: Int) -> [String] {
+    var lines = capture.components(separatedBy: .newlines)
+    while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+        lines.removeLast()
+    }
+    return Array(lines.suffix(count))
 }
 
 private enum CodexIdlePromptDetector {
@@ -683,8 +696,7 @@ private enum CodexIdlePromptDetector {
     /// so a placeholder is only trusted when no running-turn hint is present.
     static func isIdlePrompt(paneCapture: String?) -> Bool {
         guard let paneCapture, !paneCapture.isEmpty else { return false }
-        let lines = paneCapture.components(separatedBy: .newlines)
-        let tail = lines.suffix(3).joined(separator: "\n").lowercased()
+        let tail = codexPaneTail(paneCapture, 3).joined(separator: "\n").lowercased()
 
         guard tail.contains("\u{203A}") else { return false }
         guard !busyComposerHints.contains(where: tail.contains) else { return false }
