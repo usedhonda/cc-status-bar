@@ -655,18 +655,42 @@ private enum CodexQuestionSignalDetector {
 }
 
 private enum CodexIdlePromptDetector {
+    /// Composer placeholders Codex shows when the input is empty.
+    private static let emptyComposerPlaceholders = [
+        "ask codex to do anything",
+        "ask a follow-up question",
+    ]
+
+    /// Hints Codex only shows in its composer while a turn is running.
+    private static let busyComposerHints = [
+        "to interrupt",
+        "to queue",
+    ]
+
     /// Detect Codex idle prompt (waiting for user input at the main prompt).
-    /// The idle prompt has `›` and `% left` both in the last 3 lines.
-    /// During running/active states, `›` scrolls up and `% left` stays at the bottom
-    /// but they are far apart — checking last 3 lines only avoids false positives.
+    ///
+    /// The composer arrow `›` has to be in the last 3 lines: while a turn runs,
+    /// output keeps arriving and the arrow scrolls away from the tail.
+    ///
+    /// The arrow alone is not enough, so it must come with either the context
+    /// meter (`% left`) or an empty-composer placeholder. `% left` used to be
+    /// required on its own, but Codex elides the right-hand side of its footer
+    /// in a narrow pane — in a tmux column it renders as
+    /// `gpt-5.6-sol low · ~/projects/i… Goal achieved (33m)`, with the meter cut
+    /// off — so that requirement made the detector silently never fire.
+    ///
+    /// The composer stays on screen during a turn (a message can be queued),
+    /// so a placeholder is only trusted when no running-turn hint is present.
     static func isIdlePrompt(paneCapture: String?) -> Bool {
         guard let paneCapture, !paneCapture.isEmpty else { return false }
         let lines = paneCapture.components(separatedBy: .newlines)
-        let tailLines = lines.suffix(3)
-        let tail = tailLines.joined(separator: "\n")
-        let hasPromptArrow = tail.contains("\u{203A}")  // ›
-        let hasPercentLeft = tail.contains("% left")
-        return hasPromptArrow && hasPercentLeft
+        let tail = lines.suffix(3).joined(separator: "\n").lowercased()
+
+        guard tail.contains("\u{203A}") else { return false }
+        guard !busyComposerHints.contains(where: tail.contains) else { return false }
+
+        return tail.contains("% left")
+            || emptyComposerPlaceholders.contains(where: tail.contains)
     }
 }
 

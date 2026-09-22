@@ -32,6 +32,64 @@ final class CodexStatusReceiverTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - Idle prompt detection
+
+    /// Exactly what a tmux column renders for an idle Codex: the context meter
+    /// is cut off the right-hand end of the footer.
+    private let idlePaneInANarrowColumn = """
+    • You have 2 usage limit
+    resets available. Run /usage
+    to use one.
+    › Ask Codex to do anything
+
+      gpt-5.6-sol low · ~/projects/i… Goal achieved (33m)
+    """
+
+    private let idlePaneWithTheContextMeter = """
+    › Ask Codex to do anything
+
+      gpt-5.6-sol low · ~/projects/demo  73% left
+    """
+
+    @MainActor
+    func testIdleIsDetectedWhenTheFooterElidesTheContextMeter() {
+        let detected = CodexStatusReceiver.detectWaitingInputFromPane(idlePaneInANarrowColumn)
+        XCTAssertEqual(detected?.reason, .idle)
+        XCTAssertEqual(detected?.source, "pane_idle_prompt")
+    }
+
+    @MainActor
+    func testIdleIsStillDetectedFromTheContextMeterAlone() {
+        XCTAssertEqual(
+            CodexStatusReceiver.detectWaitingInputFromPane(idlePaneWithTheContextMeter)?.reason,
+            .idle
+        )
+    }
+
+    /// The composer stays on screen during a turn so a message can be queued,
+    /// so its placeholder must not be read as idle.
+    @MainActor
+    func testARunningTurnIsNotReportedAsIdle() {
+        let working = """
+        • Working (12s)
+        › Ask Codex to do anything
+          Esc to interrupt · Enter to queue message
+        """
+        XCTAssertNil(CodexStatusReceiver.detectWaitingInputFromPane(working))
+    }
+
+    /// Output scrolling past the composer is not idle either.
+    @MainActor
+    func testScrollbackWithoutTheComposerIsNotReportedAsIdle() {
+        let streaming = """
+        › Ask Codex to do anything
+          reading Sources/CCStatusBarLib/Services/CodexObserver.swift
+          applying patch
+          running tests
+        """
+        XCTAssertNil(CodexStatusReceiver.detectWaitingInputFromPane(streaming))
+    }
+
     @MainActor
     func testInferWaitingReasonDefaultsToStop() {
         let reason = CodexStatusReceiver.inferWaitingReason(from: [
