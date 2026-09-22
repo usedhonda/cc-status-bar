@@ -271,19 +271,40 @@ enum CodexObserver {
     // MARK: - Public API
 
     /// Get all active Codex sessions indexed by internal id.
-    /// In hooks mode, returns sessions from CodexHooksSessionStore (must be called from MainActor).
-    /// In legacy mode, uses stale-while-revalidate cache with pgrep-based discovery.
+    /// Which sessions exist is always decided by the process scan; hook
+    /// metadata is overlaid on top when hooks mode is on.
     @MainActor
     static func getActiveSessions() -> [String: CodexSession] {
-        if useHooksMode {
-            CodexHooksSessionStore.shared.pruneDeadProcesses()
-            return CodexHooksSessionStore.shared.activeSessions
-        }
-        return getActiveSessionsLegacy()
+        applyHookOverlay(to: getScannedSessions())
     }
 
-    /// Legacy implementation: pgrep-based discovery with stale-while-revalidate cache.
-    static func getActiveSessionsLegacy() -> [String: CodexSession] {
+    /// Fill in fields the scan could not observe from hook-reported metadata.
+    /// Never adds or removes a session: a hook event is not evidence that a
+    /// process is alive, and a missing hook event is not evidence that it died.
+    @MainActor
+    private static func applyHookOverlay(to sessions: [String: CodexSession]) -> [String: CodexSession] {
+        guard useHooksMode else { return sessions }
+        return merge(scanned: sessions, hookOverlays: CodexHooksSessionStore.shared.overlaysByCwd)
+    }
+
+    /// Visible for tests.
+    static func merge(
+        scanned: [String: CodexSession],
+        hookOverlays: [String: CodexHookOverlay]
+    ) -> [String: CodexSession] {
+        guard !hookOverlays.isEmpty else { return scanned }
+        var merged = scanned
+        for (key, var session) in scanned {
+            guard let overlay = hookOverlays[session.cwd] else { continue }
+            if session.sessionId == nil { session.sessionId = overlay.sessionId }
+            if session.modelProvider == nil { session.modelProvider = overlay.model }
+            merged[key] = session
+        }
+        return merged
+    }
+
+    /// pgrep-based discovery with a stale-while-revalidate cache.
+    static func getScannedSessions() -> [String: CodexSession] {
         let now = Date()
         if let cached = snapshotCoordinator.cachedValue() {
             if now.timeIntervalSince(cached.timestamp) < freshTTL {
@@ -302,22 +323,9 @@ enum CodexObserver {
     /// the refresh completion publishes one corrective full-list broadcast.
     @MainActor
     static func snapshotForSubscriber() async -> CodexSessionSnapshot {
-        if useHooksMode {
-            CodexHooksSessionStore.shared.pruneDeadProcesses()
-            return CodexSessionSnapshot(
-                sessions: CodexHooksSessionStore.shared.activeSessions,
-                generation: 0,
-                cacheAge: 0,
-                source: "hooks",
-                refreshDuration: nil,
-                discoveredCount: CodexHooksSessionStore.shared.activeSessions.count,
-                excludedCounts: [:]
-            )
-        }
-
         let snapshot = await snapshotCoordinator.snapshot(deadline: subscriberDeadline)
         let scan = snapshot.value
-        let sessions = scan?.sessions ?? [:]
+        let sessions = applyHookOverlay(to: scan?.sessions ?? [:])
         let discovered = scan?.discoveredCount ?? 0
         let excluded = scan?.excludedCounts ?? [:]
         if let scan {
@@ -447,34 +455,6 @@ enum CodexObserver {
         }
     }
 
-    // MARK: - Public Wrappers (for CodexHooksSessionStore)
-
-    /// Public wrapper for fetchCodexSessions (used by hooks mode bootstrap)
-    static func fetchCodexSessionsPublic() -> [String: CodexSession] {
-        fetchCodexScan().sessions
-    }
-
-    /// Find PID for a given cwd by scanning running Codex processes
-    static func findPidForCwd(_ cwd: String) -> pid_t? {
-        let pids = getCodexPIDs()
-        for pid in pids {
-            if let pidCwd = getCwd(for: pid), pidCwd == cwd {
-                return pid
-            }
-        }
-        return nil
-    }
-
-    /// Public wrapper for getTTY
-    static func getTTYPublic(for pid: pid_t) -> String? {
-        getTTY(for: pid)
-    }
-
-    /// Public wrapper for findCodexSessionExtended
-    static func findExtendedInfoPublic(for cwd: String) -> CodexSessionFileInfo? {
-        findCodexSessionExtended(for: cwd)
-    }
-
     // MARK: - Private
 
     /// Fetch active Codex sessions and stable pane evidence from running processes.
@@ -486,18 +466,18 @@ enum CodexObserver {
         let pids = pidScan.pids
 
         for pid in pids {
-            if let cwd = getCwd(for: pid) {
+            let files = processFiles(for: pid)
+            if let cwd = files.cwd {
                 var session = CodexSession(pid: pid, cwd: cwd)
 
-                // Try to find extended session info from Codex session files
-                if let extInfo = findCodexSessionExtended(for: cwd) {
+                // Extended session info comes from the transcript this very
+                // process holds open, never from a cwd + date-window guess.
+                if let extInfo = findCodexSessionExtended(for: pid, files: files) {
                     session.sessionId = extInfo.sessionId
                     session.cliVersion = extInfo.cliVersion
                     session.modelProvider = extInfo.modelProvider
                     session.originator = extInfo.originator
                     session.tokenUsage = extInfo.tokenUsage
-                } else {
-                    session.sessionId = findCodexSessionId(for: cwd)
                 }
 
                 if let tty = getTTY(for: pid) {
@@ -542,10 +522,6 @@ enum CodexObserver {
         }
 
         return "/dev/\(tty)"
-    }
-
-    private static func getCodexPIDs() -> [pid_t] {
-        getCodexPIDScan().pids
     }
 
     private static func getCodexPIDScan() -> (pids: [pid_t], excludedCounts: [String: Int]) {
@@ -747,110 +723,141 @@ enum CodexObserver {
         return output.isEmpty ? nil : output
     }
 
+    /// The open-file facts a single `lsof` call gives us about a Codex process.
+    struct CodexProcessFiles {
+        let cwd: String?
+        let rolloutPaths: [String]
+    }
+
+    /// Read cwd and open rollout transcripts for a process in one `lsof` call.
+    /// `-n -P` keeps lsof from doing reverse DNS / service lookups on the
+    /// sqlite and socket descriptors Codex keeps open.
+    private static func processFiles(for pid: pid_t) -> CodexProcessFiles {
+        let output = runCommand("/usr/sbin/lsof", ["-n", "-P", "-p", "\(pid)"])
+        return CodexProcessFiles(
+            cwd: cwd(fromLsofOutput: output),
+            rolloutPaths: rolloutPaths(fromLsofOutput: output)
+        )
+    }
+
     /// Get current working directory for a process
     private static func getCwd(for pid: pid_t) -> String? {
-        // lsof -p <pid> | grep cwd
-        let output = runCommand("/usr/sbin/lsof", ["-p", "\(pid)"])
+        processFiles(for: pid).cwd
+    }
+
+    /// NAME column of an `lsof` row (columns 9+, which may contain spaces).
+    private static func lsofName(_ line: Substring) -> (fd: String, name: String)? {
+        let columns = line.split(separator: " ", omittingEmptySubsequences: true)
+        // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+        guard columns.count >= 9 else { return nil }
+        let nameStartIndex = columns.index(columns.startIndex, offsetBy: 8)
+        return (String(columns[3]), columns[nameStartIndex...].joined(separator: " "))
+    }
+
+    /// Visible for tests.
+    static func cwd(fromLsofOutput output: String) -> String? {
         for line in output.split(separator: "\n") {
-            let columns = line.split(separator: " ", omittingEmptySubsequences: true)
-            // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-            // cwd line has FD="cwd" and NAME is the path
-            if columns.count >= 9,
-               columns[3] == "cwd" {
-                // NAME is the last column (may contain spaces)
-                let nameStartIndex = columns.index(columns.startIndex, offsetBy: 8)
-                let path = columns[nameStartIndex...].joined(separator: " ")
-                return path
+            if let row = lsofName(line), row.fd == "cwd" {
+                return row.name
             }
         }
         return nil
     }
 
-    /// Find extended Codex session info from session files.
-    /// Searches recent day directories (today -> 14 days back) for matching cwd.
-    private static func findCodexSessionExtended(for cwd: String) -> CodexSessionFileInfo? {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let sessionsDir = homeDir.appendingPathComponent(".codex/sessions")
-
-        guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return nil }
-
-        let calendar = Calendar.current
-        let now = Date()
-
-        // Search today and up to 14 days back (most recent first)
-        for daysBack in 0..<14 {
-            guard let date = calendar.date(byAdding: .day, value: -daysBack, to: now) else { continue }
-            let year = calendar.component(.year, from: date)
-            let month = calendar.component(.month, from: date)
-            let day = calendar.component(.day, from: date)
-
-            let dayDir = sessionsDir
-                .appendingPathComponent(String(format: "%04d", year))
-                .appendingPathComponent(String(format: "%02d", month))
-                .appendingPathComponent(String(format: "%02d", day))
-
-            guard FileManager.default.fileExists(atPath: dayDir.path),
-                  let files = try? FileManager.default.contentsOfDirectory(atPath: dayDir.path) else {
+    /// Rollout transcripts the process currently holds open, in lsof order.
+    /// A Codex process keeps its own transcript open, so this is the only
+    /// authoritative pid -> session mapping: `codex resume --last` keeps
+    /// appending to the original file, which stays in the day directory it
+    /// was created in, so no date-window search can find it.
+    /// Visible for tests.
+    static func rolloutPaths(fromLsofOutput output: String) -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        for line in output.split(separator: "\n") {
+            guard let row = lsofName(line) else { continue }
+            let name = row.name
+            guard name.contains("/.codex/sessions/"),
+                  name.hasSuffix(".jsonl"),
+                  (name as NSString).lastPathComponent.hasPrefix("rollout-"),
+                  seen.insert(name).inserted else {
                 continue
             }
-
-            let rolloutFiles = files
-                .filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
-                .sorted()
-                .reversed()  // Most recent first
-
-            for filename in rolloutFiles {
-                let filePath = dayDir.appendingPathComponent(filename)
-                if let info = parseCodexSessionFileExtended(filePath, lookingForCwd: cwd) {
-                    return info
-                }
-            }
+            paths.append(name)
         }
-
-        return nil
+        return paths
     }
 
-    /// Find Codex session ID from session files
-    /// Location: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-    private static func findCodexSessionId(for cwd: String) -> String? {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let sessionsDir = homeDir.appendingPathComponent(".codex/sessions")
-
-        // Get today's date components
-        let now = Date()
-        let calendar = Calendar.current
-        let year = calendar.component(.year, from: now)
-        let month = calendar.component(.month, from: now)
-        let day = calendar.component(.day, from: now)
-
-        let todayDir = sessionsDir
-            .appendingPathComponent(String(format: "%04d", year))
-            .appendingPathComponent(String(format: "%02d", month))
-            .appendingPathComponent(String(format: "%02d", day))
-
-        guard FileManager.default.fileExists(atPath: todayDir.path) else {
-            return nil
+    /// Pick the transcript that represents the interactive session itself.
+    /// Codex opens one transcript per spawned subagent thread alongside the
+    /// parent one; a subagent's `session_meta` carries `parent_thread_id` and
+    /// an object-valued `source`, while the parent's `source` is the string
+    /// `"cli"`. Visible for tests.
+    static func selectPrimaryRollout(candidates: [String], processCwd: String) -> String? {
+        struct Candidate {
+            let path: String
+            let isParent: Bool
+            let modifiedAt: Date
         }
 
-        // Find rollout files
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: todayDir.path) else {
-            return nil
+        var matching: [Candidate] = []
+        for path in candidates {
+            guard let payload = sessionMetaPayload(at: URL(fileURLWithPath: path)),
+                  payload["cwd"] as? String == processCwd else {
+                continue
+            }
+            let isParent = payload["parent_thread_id"] == nil && payload["source"] is String
+            let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+            let modifiedAt = (attributes?[.modificationDate] as? Date) ?? .distantPast
+            matching.append(Candidate(path: path, isParent: isParent, modifiedAt: modifiedAt))
         }
 
-        let rolloutFiles = files
-            .filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
-            .sorted()
-            .reversed()  // Most recent first
+        guard !matching.isEmpty else { return nil }
+        let parents = matching.filter { $0.isParent }
+        let pool = parents.isEmpty ? matching : parents
+        return pool.max { $0.modifiedAt < $1.modifiedAt }?.path
+    }
 
-        // Check each file for matching cwd
-        for filename in rolloutFiles {
-            let filePath = todayDir.appendingPathComponent(filename)
-            if let sessionId = parseCodexSessionFile(filePath, lookingForCwd: cwd) {
-                return sessionId
+    /// First line of a rollout file, decoded as `session_meta`'s payload.
+    private static func sessionMetaPayload(at url: URL) -> [String: Any]? {
+        guard let lineData = readFirstLine(of: url),
+              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+              json["type"] as? String == "session_meta",
+              let payload = json["payload"] as? [String: Any] else {
+            return nil
+        }
+        return payload
+    }
+
+    /// Read up to the first newline. The `session_meta` line embeds
+    /// `base_instructions` (the user's AGENTS.md), so its length is unbounded
+    /// in practice; a fixed-size read would silently truncate and yield nil.
+    private static func readFirstLine(of url: URL, maxBytes: Int = 1 << 20) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var buffer = Data()
+        let newline = UInt8(ascii: "\n")
+        while buffer.count < maxBytes {
+            guard let chunk = try? handle.read(upToCount: 32768), !chunk.isEmpty else { break }
+            buffer.append(chunk)
+            if let index = buffer.firstIndex(of: newline) {
+                return buffer.prefix(upTo: index)
             }
         }
+        return buffer.isEmpty ? nil : buffer.prefix(maxBytes)
+    }
 
-        return nil
+    /// Find extended Codex session info for a process from the rollout file
+    /// it currently has open.
+    private static func findCodexSessionExtended(
+        for pid: pid_t,
+        files: CodexProcessFiles
+    ) -> CodexSessionFileInfo? {
+        guard let cwd = files.cwd,
+              let path = selectPrimaryRollout(candidates: files.rolloutPaths, processCwd: cwd) else {
+            return nil
+        }
+        return parseCodexSessionFileExtended(URL(fileURLWithPath: path), lookingForCwd: cwd)
     }
 
     /// Extended parse result from a Codex session JSONL file
@@ -870,12 +877,9 @@ enum CodexObserver {
         defer { try? fileHandle.close() }
 
         // --- Head: first line for session_meta ---
-        // Codex session_meta includes base_instructions (~15KB), so we need a large read.
-        let headChunkSize = 32768
-        guard let headData = try? fileHandle.read(upToCount: headChunkSize),
-              let headStr = String(data: headData, encoding: .utf8),
-              let firstLine = headStr.split(separator: "\n").first,
-              let lineData = firstLine.data(using: .utf8),
+        // Codex session_meta embeds base_instructions (the user's AGENTS.md),
+        // so the line length is unbounded; read up to the first newline.
+        guard let lineData = readFirstLine(of: url),
               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
               let type = json["type"] as? String,
               type == "session_meta",
