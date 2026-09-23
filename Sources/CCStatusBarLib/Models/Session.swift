@@ -131,5 +131,8 @@ struct Session: Codable, Identifiable, Equatable {
         case isDisambiguated = "is_disambiguated"
         case contextUsedPercentage = "context_used_percentage"
         case totalCostUSD = "total_cost_usd"
+        case cacheExpiresAt = "cache_expires_at"
+        case cacheRecacheTokens = "cache_recache_tokens"
+        case lastUserPromptAt = "last_user_prompt_at"
     }
 }

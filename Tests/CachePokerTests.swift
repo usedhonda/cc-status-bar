@@ -67,6 +67,15 @@ final class CachePokerTests: XCTestCase {
         XCTAssertFalse(KeepWarmAPI.isLoopback(nil))
     }
 
+    /// sessions.json goes through Session's explicit CodingKeys; a field left
+    /// out of them is silently dropped on save.
+    func testCacheStateSurvivesTheSessionStore() throws {
+        let session = idleSession()
+        let restored = try JSONDecoder().decode(Session.self, from: JSONEncoder().encode(session))
+        XCTAssertEqual(restored.cacheExpiresAt, session.cacheExpiresAt)
+        XCTAssertEqual(restored.lastUserPromptAt, session.lastUserPromptAt)
+    }
+
     func testStatuslinePromptCacheIsDecoded() throws {
         let warm = try JSONDecoder().decode(StatuslineUpdate.self, from: Data("""
         {"session_id":"s1","prompt_cache":{"warm":true,"expires_at":1800000060,"recache_tokens_if_cold":442184}}
