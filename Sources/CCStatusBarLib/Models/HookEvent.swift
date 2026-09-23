@@ -41,6 +41,7 @@ struct HookEvent: Codable {
     var actualTermProgram: String?  // Actual terminal when inside tmux (detected from client parent)
     var editorBundleID: String?  // Detected editor bundle ID via PPID chain
     var editorPID: Int32?  // Editor process ID for direct activation
+    var prompt: String? = nil  // UserPromptSubmit text (to tell keep-alive pokes from real prompts)
 
     /// Check if this is a permission prompt notification
     /// Uses notification_type first, falls back to message content check (workaround for Claude Code bug)
@@ -72,5 +73,6 @@ struct HookEvent: Codable {
         case actualTermProgram = "actual_term_program"
         case editorBundleID = "editor_bundle_id"
         case editorPID = "editor_pid"
+        case prompt
     }
 }

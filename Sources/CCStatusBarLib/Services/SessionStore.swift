@@ -239,6 +239,10 @@ final class SessionStore {
             )
         }
 
+        if event.hookEventName == .userPromptSubmit, !KeepWarm.isKeepAlivePrompt(event.prompt) {
+            session.lastUserPromptAt = now
+        }
+
         data.sessions[key] = session
         data.updatedAt = now
 
@@ -405,6 +409,14 @@ final class SessionStore {
             if let totalCostUSD = update.totalCostUSD,
                updated.totalCostUSD != totalCostUSD {
                 updated.totalCostUSD = totalCostUSD
+                changed = true
+            }
+
+            if update.hasPromptCache,
+               updated.cacheExpiresAt != update.cacheExpiresAt
+                || updated.cacheRecacheTokens != update.cacheRecacheTokens {
+                updated.cacheExpiresAt = update.cacheExpiresAt
+                updated.cacheRecacheTokens = update.cacheRecacheTokens
                 changed = true
             }
 

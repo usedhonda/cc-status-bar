@@ -47,6 +47,23 @@ final class WebServer {
             return .ok(.text("received"))
         }
 
+        // Prompt cache keep-warm. The server also listens for Tailscale peers,
+        // and a poke types into a terminal, so both routes are loopback-only.
+        httpServer.GET["/api/cache"] = { request in
+            guard KeepWarmAPI.isLoopback(request.address) else { return .forbidden }
+            let payload = KeepWarmAPI.statusPayload(SessionStore.shared.getSessions())
+            return .ok(.data(KeepWarmAPI.json(payload), contentType: "application/json"))
+        }
+        httpServer.POST["/api/poke"] = { request in
+            guard KeepWarmAPI.isLoopback(request.address) else { return .forbidden }
+            let result = KeepWarmAPI.poke(body: Data(request.body), sessions: SessionStore.shared.getSessions())
+            let body = KeepWarmAPI.json(result.payload)
+            if result.status == 404 {
+                return .raw(404, "Not Found", ["Content-Type": "application/json"]) { try $0.write(body) }
+            }
+            return .ok(.data(body, contentType: "application/json"))
+        }
+
         // Try ports starting from basePort
         var lastError: Error?
         for offset in 0..<maxPortAttempts {

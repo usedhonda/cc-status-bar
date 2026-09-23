@@ -30,6 +30,9 @@ struct Session: Codable, Identifiable, Equatable {
     var isDisambiguated: Bool?  // true if project name was expanded to parent/child format due to duplicate basenames
     var contextUsedPercentage: Double?  // Claude Code statusline context_window.used_percentage
     var totalCostUSD: Double?  // Claude Code statusline cost.total_cost_usd
+    var cacheExpiresAt: Date? = nil  // statusline prompt_cache.expires_at while the cache is warm
+    var cacheRecacheTokens: Int? = nil  // statusline prompt_cache.recache_tokens_if_cold
+    var lastUserPromptAt: Date? = nil  // last real (non keep-alive) UserPromptSubmit
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId

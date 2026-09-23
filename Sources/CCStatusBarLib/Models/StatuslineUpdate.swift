@@ -4,11 +4,29 @@ struct StatuslineUpdate: Decodable, Equatable {
     let sessionId: String
     let contextUsedPercentage: Double?
     let totalCostUSD: Double?
+    /// Present only while the prompt cache is warm; nil means cold or unknown.
+    var cacheExpiresAt: Date? = nil
+    var cacheRecacheTokens: Int? = nil
+    /// Whether the input carried a prompt_cache object at all.
+    var hasPromptCache = false
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case contextWindow = "context_window"
         case cost
+        case promptCache = "prompt_cache"
+    }
+
+    private struct PromptCache: Decodable {
+        let warm: Bool?
+        let expiresAt: Double?
+        let recacheTokensIfCold: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case warm
+            case expiresAt = "expires_at"
+            case recacheTokensIfCold = "recache_tokens_if_cold"
+        }
     }
 
     private struct ContextWindow: Decodable {
@@ -43,6 +61,14 @@ struct StatuslineUpdate: Decodable, Equatable {
         totalCostUSD = try container
             .decodeIfPresent(Cost.self, forKey: .cost)?
             .totalCostUSD
+
+        if let cache = try? container.decodeIfPresent(PromptCache.self, forKey: .promptCache) {
+            hasPromptCache = true
+            if cache.warm == true, let expiresAt = cache.expiresAt {
+                cacheExpiresAt = Date(timeIntervalSince1970: expiresAt)
+            }
+            cacheRecacheTokens = cache.recacheTokensIfCold
+        }
     }
 }
 

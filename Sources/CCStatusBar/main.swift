@@ -10,12 +10,12 @@ struct CCStatusBarCLI: ParsableCommand {
         commandName: "CCStatusBar",
         abstract: "CC Status Bar - Claude Code session monitor",
         version: "1.0.0",
-        subcommands: [HookCommand.self, SetupCommand.self, ListCommand.self, EmitCommand.self, FocusCommand.self, DictationCommand.self, StatuslineCommand.self]
+        subcommands: [HookCommand.self, SetupCommand.self, ListCommand.self, EmitCommand.self, FocusCommand.self, DictationCommand.self, StatuslineCommand.self, PokeCommand.self]
     )
 }
 
 // Check if we have real CLI arguments (not system args like -psn_)
-let cliCommands = ["hook", "setup", "list", "emit", "focus", "dictation", "statusline", "--help", "-h", "--version"]
+let cliCommands = ["hook", "setup", "list", "emit", "focus", "dictation", "statusline", "poke", "--help", "-h", "--version"]
 let hasCliCommand = CommandLine.arguments.dropFirst().contains { arg in
     cliCommands.contains(arg) || cliCommands.contains(where: { arg.hasPrefix($0) })
 }

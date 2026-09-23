@@ -308,6 +308,13 @@ enum TmuxHelper {
         return true
     }
 
+    /// Type `text` literally (no key-name interpretation) into a pane, then press Enter.
+    static func sendLiteralLine(_ paneInfo: PaneInfo, text: String) {
+        let target = "\(paneInfo.session):\(paneInfo.window).\(paneInfo.pane)"
+        _ = runTmuxCommandArgs(["send-keys", "-t", target, "-l", text], socketPath: paneInfo.socketPath)
+        _ = runTmuxCommandArgs(["send-keys", "-t", target, "Enter"], socketPath: paneInfo.socketPath)
+    }
+
     /// Get the client TTY for a tmux session (for sending BEL).
     /// Uses `list-clients -t <session> -F #{client_tty}` to find the terminal TTY.
     static func getClientTTY(for sessionName: String, socketPath: String? = nil) -> String? {

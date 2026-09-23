@@ -5,6 +5,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var sessionObserver: SessionObserver!
     private var cancellables = Set<AnyCancellable>()
+    private var keepWarmPoked: [String: Date] = [:]
     private var isMenuOpen = false
     /// Set when a rebuild was requested while the menu was open; flushed on close.
     private var pendingMenuRebuild = false
@@ -123,6 +124,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             _ = CodexObserver.getScannedSessions()
             DebugLog.log("[AppDelegate] Codex scan cache pre-warm complete")
         }
+
+        // Prompt cache keep-warm (off unless enabled in the menu)
+        CachePoker.writeOwnership(enabled: AppSettings.cacheKeepWarmHours > 0)
+        Timer.publish(every: 30.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.runKeepWarm()
+            }
+            .store(in: &cancellables)
 
         // Poll Codex status reconciliation so synthetic stopped can be reflected without hooks.
         Timer.publish(every: 2.0, on: .main, in: .common)
@@ -478,6 +488,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autofocusItem.state = AppSettings.autofocusEnabled ? .on : .off
         menu.addItem(autofocusItem)
 
+        // Keep prompt cache warm submenu
+        let keepWarmItem = NSMenuItem(title: "Keep Cache Warm", action: nil, keyEquivalent: "")
+        keepWarmItem.submenu = createKeepWarmMenu()
+        menu.addItem(keepWarmItem)
+
         // Session Timeout submenu
         let timeoutItem = NSMenuItem(title: "Session Timeout", action: nil, keyEquivalent: "")
         timeoutItem.submenu = createTimeoutMenu()
@@ -583,6 +598,40 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.state = newState ? .on : .off
         DebugLog.log("[AppDelegate] Global hotkey \(newState ? "enabled" : "disabled")")
         refreshUI()  // Update menu to show/hide hotkey description
+    }
+
+    private func createKeepWarmMenu() -> NSMenu {
+        let menu = NSMenu()
+        let current = AppSettings.cacheKeepWarmHours
+        for (title, hours) in [("Off", 0), ("1 hour", 1), ("3 hours", 3), ("6 hours", 6), ("12 hours", 12)] {
+            let item = NSMenuItem(title: title, action: #selector(setKeepWarmHours(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = hours
+            item.state = hours == current ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @MainActor @objc private func setKeepWarmHours(_ sender: NSMenuItem) {
+        AppSettings.cacheKeepWarmHours = sender.tag
+        CachePoker.writeOwnership(enabled: sender.tag > 0)
+        DebugLog.log("[AppDelegate] Keep cache warm: \(sender.tag)h")
+        refreshUI()
+    }
+
+    /// Poke idle sessions whose prompt cache is about to go cold.
+    @MainActor private func runKeepWarm() {
+        let hours = AppSettings.cacheKeepWarmHours
+        guard hours > 0 else { return }
+        let now = Date()
+        let due = CachePoker.dueSessions(
+            SessionStore.shared.getSessions(), now: now, hours: Double(hours), alreadyPoked: keepWarmPoked)
+        for session in due {
+            keepWarmPoked[session.id] = session.cacheExpiresAt
+            let result = CachePoker.poke(session)
+            DebugLog.log("[AppDelegate] Keep-warm \(session.projectName): \(result)")
+        }
     }
 
     private func createTimeoutMenu() -> NSMenu {

@@ -20,6 +20,7 @@ enum SessionDisplayMode: String, CaseIterable {
 enum AppSettings {
     private enum Keys {
         static let launchAtLogin = "launchAtLogin"
+        static let cacheKeepWarmHours = "cacheKeepWarmHours"
         static let notificationsEnabled = "notificationsEnabled"
         static let sessionTimeoutMinutes = "sessionTimeoutMinutes"
         static let webServerEnabled = "webServerEnabled"
@@ -129,6 +130,13 @@ enum AppSettings {
             return defaults.bool(forKey: Keys.showCodexSessions)
         }
         set { defaults.set(newValue, forKey: Keys.showCodexSessions) }
+    }
+
+    /// Keep an idle session's prompt cache warm for this many hours after its
+    /// last real prompt. 0 = off (default).
+    static var cacheKeepWarmHours: Int {
+        get { defaults.integer(forKey: Keys.cacheKeepWarmHours) }
+        set { defaults.set(newValue, forKey: Keys.cacheKeepWarmHours) }
     }
 
     static var autofocusEnabled: Bool {
