@@ -121,7 +121,10 @@ enum CachePoker {
 
     /// Advertise (or withdraw) ownership of keep-warm to the statusline script.
     static func writeOwnership(enabled: Bool) {
-        let state: [String: Any] = ["enabled": enabled, "pid": Int(getpid())]
+        var state: [String: Any] = ["enabled": enabled, "pid": Int(getpid())]
+        if KeepWarmServer.shared.port > 0 {
+            state["api_port"] = Int(KeepWarmServer.shared.port)
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: state) else { return }
         try? FileManager.default.createDirectory(
             at: KeepWarm.ownershipFile.deletingLastPathComponent(), withIntermediateDirectories: true)

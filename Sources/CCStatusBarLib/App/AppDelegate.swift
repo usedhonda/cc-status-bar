@@ -125,7 +125,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DebugLog.log("[AppDelegate] Codex scan cache pre-warm complete")
         }
 
-        // Prompt cache keep-warm (off unless enabled in the menu)
+        // Prompt cache keep-warm (off unless enabled in the menu); its API is always up on loopback
+        KeepWarmServer.shared.start()
         CachePoker.writeOwnership(enabled: AppSettings.cacheKeepWarmHours > 0)
         Timer.publish(every: 30.0, on: .main, in: .common)
             .autoconnect()
