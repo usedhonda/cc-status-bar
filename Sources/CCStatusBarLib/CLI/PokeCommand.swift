@@ -22,6 +22,9 @@ public struct PokeCommand: ParsableCommand {
     @Flag(name: .long, help: "Print each session's cache state as JSON instead of poking")
     var list = false
 
+    @Flag(name: .long, help: "Run every safety check and report whether it would send, without sending")
+    var dryRun = false
+
     public init() {}
 
     public func run() throws {
@@ -32,6 +35,17 @@ public struct PokeCommand: ParsableCommand {
         }
         guard session != nil || tty != nil else {
             throw ValidationError("Pass --session <id>, --tty <tty>, or --list")
+        }
+        if dryRun {
+            guard let target = KeepWarmAPI.findSession(sessions, sessionId: session, tty: tty) else {
+                print(String(decoding: KeepWarmAPI.json(["result": "skipped", "reason": "session-not-found"]), as: UTF8.self))
+                throw ExitCode(1)
+            }
+            let reason = CachePoker.pokeCheck(target).reason
+            var payload: [String: Any] = ["result": reason == nil ? "would-send" : "skipped", "session_id": target.sessionId]
+            payload["reason"] = reason
+            print(String(decoding: KeepWarmAPI.json(payload), as: UTF8.self))
+            return
         }
         var body: [String: Any] = [:]
         body["session_id"] = session

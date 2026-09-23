@@ -9,12 +9,14 @@ struct StatuslineUpdate: Decodable, Equatable {
     var cacheRecacheTokens: Int? = nil
     /// Whether the input carried a prompt_cache object at all.
     var hasPromptCache = false
+    var transcriptPath: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case contextWindow = "context_window"
         case cost
         case promptCache = "prompt_cache"
+        case transcriptPath = "transcript_path"
     }
 
     private struct PromptCache: Decodable {
@@ -61,6 +63,8 @@ struct StatuslineUpdate: Decodable, Equatable {
         totalCostUSD = try container
             .decodeIfPresent(Cost.self, forKey: .cost)?
             .totalCostUSD
+
+        transcriptPath = try? container.decodeIfPresent(String.self, forKey: .transcriptPath)
 
         if let cache = try? container.decodeIfPresent(PromptCache.self, forKey: .promptCache) {
             hasPromptCache = true

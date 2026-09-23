@@ -49,6 +49,39 @@ final class CachePokerTests: XCTestCase {
         XCTAssertTrue(CachePoker.dueSessions([session], now: now, hours: 6, alreadyPoked: poked).isEmpty)
     }
 
+    // MARK: - Independent turn check (a stale Stop must not open a send window)
+
+    private func line(_ type: String, stop: String? = nil, sidechain: Bool = false) -> String {
+        var message: [String: Any] = ["content": "x"]
+        message["stop_reason"] = stop
+        let entry: [String: Any] = ["type": type, "isSidechain": sidechain, "message": message]
+        return String(decoding: try! JSONSerialization.data(withJSONObject: entry), as: UTF8.self)
+    }
+
+    func testAFinishedTurnAllowsAPoke() {
+        let lines = [line("user"), line("assistant", stop: "tool_use"), line("user"),
+                     line("assistant", stop: "end_turn"), #"{"type":"system"}"#, #"{"type":"last-prompt"}"#]
+        XCTAssertTrue(CachePoker.turnIsFinished(transcriptLines: lines))
+    }
+
+    /// The case the hook state misses: Stop was recorded, then a new prompt
+    /// started the next turn before any other hook reached us.
+    func testATurnStartedAfterTheLastStopBlocksThePoke() {
+        XCTAssertFalse(CachePoker.turnIsFinished(transcriptLines: [line("assistant", stop: "end_turn"), line("user")]))
+        XCTAssertFalse(CachePoker.turnIsFinished(transcriptLines: [line("assistant", stop: "end_turn"), line("user"),
+                                                                   line("assistant", stop: "tool_use")]))
+    }
+
+    func testSubagentEntriesDoNotCountAsTheMainTurn() {
+        let lines = [line("user"), line("assistant", stop: "end_turn", sidechain: true)]
+        XCTAssertFalse(CachePoker.turnIsFinished(transcriptLines: lines))
+    }
+
+    func testAnUnreadableTranscriptIsNeverTreatedAsIdle() {
+        XCTAssertFalse(CachePoker.transcriptTurnIsFinished("/nonexistent/transcript.jsonl"))
+        XCTAssertFalse(CachePoker.turnIsFinished(transcriptLines: []))
+    }
+
     func testKeepAlivePromptsAreRecognised() {
         XCTAssertTrue(KeepWarm.isKeepAlivePrompt(KeepWarm.text))
         XCTAssertFalse(KeepWarm.isKeepAlivePrompt("fix the keep-alive bug"))

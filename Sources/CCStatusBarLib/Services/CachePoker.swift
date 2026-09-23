@@ -76,16 +76,31 @@ enum CachePoker {
         return lastPrompt.addingTimeInterval(hours * 3600)
     }
 
-    /// Send one keep-alive turn now, after every safety check.
-    static func poke(_ session: Session) -> PokeResult {
-        if let reason = blockingReason(session) { return .skipped(reason: reason) }
+    /// Every check `poke` makes, without sending. nil means it would send.
+    static func pokeCheck(_ session: Session) -> (reason: String?, pane: TmuxHelper.PaneInfo?) {
+        if let reason = blockingReason(session) { return (reason, nil) }
         guard let tty = session.tty, let pane = TmuxHelper.getPaneInfo(for: tty) else {
-            return .skipped(reason: "no-tmux-pane")
+            return ("no-tmux-pane", nil)
         }
         let target = "\(pane.session):\(pane.window).\(pane.pane)"
         guard let capture = TmuxHelper.capturePane(target: target, lines: 0, socketPath: pane.socketPath),
               composerIsEmpty(capture) else {
-            return .skipped(reason: "composer-not-empty")
+            return ("composer-not-empty", nil)
+        }
+        // Hook state alone is not enough: a Stop can be the last event we saw
+        // while the next turn is already running (a queued prompt, a missed
+        // UserPromptSubmit). The transcript is written by Claude Code itself,
+        // so read it last, right before sending.
+        guard let path = session.transcriptPath else { return ("no-transcript", nil) }
+        guard transcriptTurnIsFinished(path) else { return ("turn-in-progress", nil) }
+        return (nil, pane)
+    }
+
+    /// Send one keep-alive turn now, after every safety check.
+    static func poke(_ session: Session) -> PokeResult {
+        let check = pokeCheck(session)
+        guard check.reason == nil, let pane = check.pane, let tty = session.tty else {
+            return .skipped(reason: check.reason ?? "unknown")
         }
         if let expiresAt = session.cacheExpiresAt, !claim(sessionId: session.sessionId, expiresAt: expiresAt) {
             return .skipped(reason: "already-poked")
@@ -93,6 +108,36 @@ enum CachePoker {
         TmuxHelper.sendLiteralLine(pane, text: KeepWarm.text)
         DebugLog.log("[CachePoker] Keep-alive sent to \(session.projectName) (\(tty))")
         return .sent
+    }
+
+    /// Whether the main conversation's last turn ended with Claude's final reply.
+    /// Reads only the tail of the transcript; anything unreadable is "not finished".
+    static func transcriptTurnIsFinished(_ path: String, tailBytes: UInt64 = 1 << 20) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let size = handle.seekToEndOfFile()
+        handle.seek(toFileOffset: size > tailBytes ? size - tailBytes : 0)
+        guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return turnIsFinished(transcriptLines: text.split(separator: "\n").map(String.init))
+    }
+
+    /// Pure: the last main-chain user/assistant entry must be an assistant
+    /// `end_turn`. A tool call, a tool result, a pending prompt, or hook
+    /// feedback that continues the turn all count as in progress.
+    static func turnIsFinished(transcriptLines: [String]) -> Bool {
+        var finished = false
+        for line in transcriptLines {
+            guard let data = line.data(using: .utf8),
+                  let entry = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = entry["type"] as? String,
+                  type == "user" || type == "assistant",
+                  entry["isSidechain"] as? Bool != true else { continue }
+            let message = entry["message"] as? [String: Any]
+            finished = type == "assistant" && message?["stop_reason"] as? String == "end_turn"
+        }
+        return finished
     }
 
     /// Claude Code's empty prompt line is a lone `❯` near the bottom of the pane.
@@ -142,6 +187,7 @@ enum CachePoker {
         dict["tty"] = session.tty
         dict["waiting_reason"] = session.waitingReason?.rawValue
         dict["blocking_reason"] = blockingReason(session)
+        dict["transcript_path"] = session.transcriptPath
         dict["cache_expires_at"] = session.cacheExpiresAt.map { Int($0.timeIntervalSince1970) }
         dict["recache_tokens_if_cold"] = session.cacheRecacheTokens
         dict["last_user_prompt_at"] = session.lastUserPromptAt.map { Int($0.timeIntervalSince1970) }

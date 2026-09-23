@@ -239,6 +239,10 @@ final class SessionStore {
             )
         }
 
+        if let transcriptPath = event.transcriptPath {
+            session.transcriptPath = transcriptPath
+        }
+
         if event.hookEventName == .userPromptSubmit, !KeepWarm.isKeepAlivePrompt(event.prompt) {
             session.lastUserPromptAt = now
         }
@@ -409,6 +413,11 @@ final class SessionStore {
             if let totalCostUSD = update.totalCostUSD,
                updated.totalCostUSD != totalCostUSD {
                 updated.totalCostUSD = totalCostUSD
+                changed = true
+            }
+
+            if let transcriptPath = update.transcriptPath, updated.transcriptPath != transcriptPath {
+                updated.transcriptPath = transcriptPath
                 changed = true
             }
 
