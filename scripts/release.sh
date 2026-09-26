@@ -56,7 +56,11 @@ echo ""
 
 # Step 3: Copy to app bundle
 echo -e "${GREEN}[3/8] Updating app bundle...${NC}"
-cp .build/apple/Products/Release/${APP_NAME} ${APP_NAME}.app/Contents/MacOS/
+# The universal product's directory moved between Swift versions
+# (.build/apple/... -> .build/out/...); ask SwiftPM instead of hardcoding it.
+BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+mkdir -p ${APP_NAME}.app/Contents/MacOS
+cp "${BIN_DIR}/${APP_NAME}" ${APP_NAME}.app/Contents/MacOS/
 echo "Architecture: $(lipo -info ${APP_NAME}.app/Contents/MacOS/${APP_NAME})"
 echo -e "${GREEN}App bundle updated${NC}"
 echo ""
