@@ -513,14 +513,14 @@ enum CodexObserver {
     /// - Returns: TTY path (e.g., "/dev/ttys001") or nil
     private static func getTTY(for pid: pid_t) -> String? {
         // ps -p <pid> -o tty=
-        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "tty="])
-        let tty = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        controllingTerminal(fromPSField: runCommand("/bin/ps", ["-p", "\(pid)", "-o", "tty="]))
+    }
 
-        // Empty or "??" means no controlling terminal
-        guard !tty.isEmpty, tty != "??" else {
-            return nil
-        }
-
+    /// `ps -o tty=` output to a device path; nil when there is no controlling
+    /// terminal (empty or "??"). Visible for tests.
+    static func controllingTerminal(fromPSField field: String) -> String? {
+        let tty = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tty.isEmpty, tty != "??" else { return nil }
         return "/dev/\(tty)"
     }
 
@@ -543,6 +543,14 @@ enum CodexObserver {
             let commandLine = getCommandLine(for: pid)
             if let reason = codexCommandExclusionReason(commandLine) {
                 excludedCounts[reason, default: 0] += 1
+                return false
+            }
+            // An interactive Codex session always runs in a terminal. Headless
+            // ones (app servers started by ChatGPT or agent runtimes, one-shot
+            // workers) have none, cannot be focused, and must not become rows,
+            // whatever subcommand name they happen to use.
+            if getTTY(for: pid) == nil {
+                excludedCounts["no-tty", default: 0] += 1
                 return false
             }
             return true

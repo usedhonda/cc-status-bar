@@ -48,3 +48,13 @@ final class CodexObserverTests: XCTestCase {
         XCTAssertFalse(CodexObserver.shouldTrackCodexCommandLine("   "))
     }
 }
+
+final class CodexControllingTerminalTests: XCTestCase {
+    /// Headless Codex processes (app servers, agent-runtime workers) report no
+    /// terminal; only processes with one may become Cdx session rows.
+    func testOnlyAProcessWithATerminalCountsAsASession() {
+        XCTAssertEqual(CodexObserver.controllingTerminal(fromPSField: "ttys005\n"), "/dev/ttys005")
+        XCTAssertNil(CodexObserver.controllingTerminal(fromPSField: "??"))
+        XCTAssertNil(CodexObserver.controllingTerminal(fromPSField: "  \n"))
+    }
+}
