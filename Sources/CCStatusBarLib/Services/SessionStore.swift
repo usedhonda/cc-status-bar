@@ -14,10 +14,11 @@ struct ClaudeGhostCleanupResult: Equatable {
     var markedStopped: [String] = []
     var removed: [String] = []
     var seeded: [String] = []
+    var confirmedAlive: [String] = []
     var skippedReason: String?
 
     var changed: Bool {
-        !markedStopped.isEmpty || !removed.isEmpty || !seeded.isEmpty
+        !markedStopped.isEmpty || !removed.isEmpty || !seeded.isEmpty || !confirmedAlive.isEmpty
     }
 }
 
@@ -488,6 +489,12 @@ final class SessionStore {
 
         for (key, session) in data.sessions {
             if liveSessionIds.contains(session.sessionId) {
+                // Alive, however long it has been idle: keep it past the
+                // session timeout, which is meant for ghosts, not quiet sessions.
+                var alive = session
+                alive.lastSeenAliveAt = now
+                data.sessions[key] = alive
+                result.confirmedAlive.append(key)
                 continue
             }
 

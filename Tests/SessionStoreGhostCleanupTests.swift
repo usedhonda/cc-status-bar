@@ -50,8 +50,19 @@ final class SessionStoreGhostCleanupTests: XCTestCase {
             removalGrace: 60
         )
 
-        XCTAssertFalse(result.changed)
+        XCTAssertEqual(result.confirmedAlive, [live.id])
         XCTAssertEqual(data.sessions[live.id]?.status, .running)
+        XCTAssertEqual(data.sessions[live.id]?.lastSeenAliveAt, now)
+    }
+
+    /// Seen on a Mac mini: sessions idle for hours vanished from the list
+    /// under the default 60-minute timeout although claude agents listed them.
+    func testAnIdleSessionConfirmedAliveStaysPastTheTimeout() {
+        var idle = makeSession(sessionId: "idle", status: .waitingInput,
+                               updatedAt: now.addingTimeInterval(-10 * 3600), tty: "/dev/ttys006")
+        XCTAssertEqual(StoreData.lastActivity(idle), idle.updatedAt)
+        idle.lastSeenAliveAt = now
+        XCTAssertEqual(StoreData.lastActivity(idle), now)
     }
 
     func testFreshMissingSessionIsMarkedStopped() {

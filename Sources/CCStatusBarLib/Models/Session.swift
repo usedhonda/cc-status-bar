@@ -34,6 +34,7 @@ struct Session: Codable, Identifiable, Equatable {
     var cacheRecacheTokens: Int? = nil  // statusline prompt_cache.recache_tokens_if_cold
     var lastUserPromptAt: Date? = nil  // last real (non keep-alive) UserPromptSubmit
     var transcriptPath: String? = nil  // Claude Code transcript, the independent idle check for keep-warm
+    var lastSeenAliveAt: Date? = nil  // last time `claude agents` listed this session as running
 
     var id: String {
         tty.map { "\(sessionId):\($0)" } ?? sessionId
@@ -136,5 +137,6 @@ struct Session: Codable, Identifiable, Equatable {
         case cacheRecacheTokens = "cache_recache_tokens"
         case lastUserPromptAt = "last_user_prompt_at"
         case transcriptPath = "transcript_path"
+        case lastSeenAliveAt = "last_seen_alive_at"
     }
 }

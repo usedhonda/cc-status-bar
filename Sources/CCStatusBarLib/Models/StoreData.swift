@@ -28,7 +28,7 @@ struct StoreData: Codable {
         } else {
             let timeout: TimeInterval = Double(minutes) * 60
             allSessions = sessions.values
-                .filter { $0.status != .stopped && Date().timeIntervalSince($0.updatedAt) <= timeout }
+                .filter { $0.status != .stopped && Date().timeIntervalSince(Self.lastActivity($0)) <= timeout }
                 .sorted { sessionOrder($0) < sessionOrder($1) }
         }
 
@@ -40,6 +40,12 @@ struct StoreData: Codable {
             }
             return true
         }
+    }
+
+    /// A session idle for hours but confirmed running by `claude agents` is
+    /// still active; the timeout is only there to drop sessions that vanished.
+    static func lastActivity(_ session: Session) -> Date {
+        max(session.updatedAt, session.lastSeenAliveAt ?? .distantPast)
     }
 
     /// Session ordering: displayOrder if set, otherwise use createdAt as fallback
