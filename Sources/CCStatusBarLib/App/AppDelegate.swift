@@ -948,9 +948,6 @@ $CCSB_TMUX_PANE_TARGET
 
         // Check if session is acknowledged (for display purposes)
         let isAcknowledged = sessionObserver.isAcknowledged(sessionId: session.id)
-        let displayStatus: SessionStatus = (isAcknowledged && session.status == .waitingInput)
-            ? .running  // Show as green if acknowledged
-            : session.status
 
         // Get pane info once and reuse for both isTmuxDetached and displayText
         let paneInfo: TmuxHelper.PaneInfo? = session.tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
@@ -958,20 +955,22 @@ $CCSB_TMUX_PANE_TARGET
         // Check if tmux session is detached
         let isTmuxDetached = paneInfo.map { !TmuxHelper.isSessionAttached($0.session, socketPath: $0.socketPath) } ?? false
 
-        // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown, green for running/acknowledged
+        // Symbol color: gray for detached tmux, red for permission_prompt, yellow for stop/unknown
+        // (muted once acknowledged: seen, but still waiting), green for running
         let theme = AppSettings.colorTheme
         let symbolColor: NSColor
         if isTmuxDetached {
             symbolColor = .tertiaryLabelColor  // Grayed out for detached tmux
-        } else if !isAcknowledged && session.status == .waitingInput {
-            // Unacknowledged waiting: red for permission_prompt, yellow otherwise
-            symbolColor = (session.waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
         } else {
-            switch displayStatus {
+            switch session.status {
             case .running:
                 symbolColor = theme.greenColor
             case .waitingInput:
-                symbolColor = theme.yellowColor  // Fallback (shouldn't reach here if acknowledged)
+                if isAcknowledged {
+                    symbolColor = (session.waitingReason == .permissionPrompt) ? theme.mutedRedColor : theme.mutedYellowColor
+                } else {
+                    symbolColor = (session.waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
+                }
             case .stopped:
                 symbolColor = .systemGray
             }
@@ -988,7 +987,7 @@ $CCSB_TMUX_PANE_TARGET
         if session.isToolRunning == true {
             symbol = "◉"  // Tool running indicator
         } else {
-            symbol = displayStatus.symbol  // Static symbol (●, ◐, ✓)
+            symbol = session.status.symbol  // Static symbol (●, ◐, ✓)
         }
         let symbolAttr = NSAttributedString(
             string: "\(symbol) ",
@@ -1029,7 +1028,7 @@ $CCSB_TMUX_PANE_TARGET
         let timeStr = formatTime(session.updatedAt)
         let usageSuffix = session.usageSummaryText.map { " • \($0)" } ?? ""
         let infoAttr = NSAttributedString(
-            string: "\n   \(session.environmentLabel) • \(displayStatus.label)\(usageSuffix) • \(timeStr)",
+            string: "\n   \(session.environmentLabel) • \(session.status.label)\(usageSuffix) • \(timeStr)",
             attributes: [
                 .foregroundColor: secondaryTextColor,
                 .font: NSFont.systemFont(ofSize: 12)
@@ -1103,13 +1102,15 @@ $CCSB_TMUX_PANE_TARGET
         let waitingReason = (status == .waitingInput)
             ? CodexStatusReceiver.shared.getWaitingReason(for: codexSession.cwd)
             : nil
-        let displayStatus: CodexStatus = (isAcked && status == .waitingInput) ? .running : status
         let symbolColor: NSColor
-        if displayStatus == .stopped {
+        if status == .stopped {
             symbolColor = NSColor.systemGray
-        } else if displayStatus == .waitingInput {
+        } else if status == .waitingInput {
             if waitingReason == .idle {
                 symbolColor = NSColor.systemGray
+            } else if isAcked {
+                // Seen, but still waiting
+                symbolColor = (waitingReason == .permissionPrompt) ? theme.mutedRedColor : theme.mutedYellowColor
             } else {
                 symbolColor = (waitingReason == .permissionPrompt) ? theme.redColor : theme.yellowColor
             }
@@ -1117,7 +1118,7 @@ $CCSB_TMUX_PANE_TARGET
             symbolColor = theme.greenColor
         }
         let symbol: String
-        switch displayStatus {
+        switch status {
         case .running: symbol = "●"
         case .waitingInput: symbol = (waitingReason == .idle) ? "○" : "◐"
         case .stopped: symbol = "✓"
@@ -1165,11 +1166,11 @@ $CCSB_TMUX_PANE_TARGET
         // Line 3:   Environment • Status • HH:mm
         let envLabel = env.displayName
         let statusLabel: String
-        if displayStatus == .waitingInput {
+        if status == .waitingInput {
             if waitingReason == .permissionPrompt { statusLabel = "Permission" }
             else if waitingReason == .idle { statusLabel = "Idle" }
             else { statusLabel = "Waiting" }
-        } else if displayStatus == .stopped {
+        } else if status == .stopped {
             statusLabel = "Stopped"
         } else {
             statusLabel = "Running"
