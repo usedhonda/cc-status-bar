@@ -24,6 +24,7 @@ final class EditorDetector {
         "com.vscodium": "VSCodium",
         "com.positron.positron": "Positron",
         "com.byte.trae": "Trae",
+        "com.trae.app": "Trae",  // Trae renamed its bundle; keep both
         "dev.zed.Zed": "Zed",
     ]
 
