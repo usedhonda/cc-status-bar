@@ -674,42 +674,44 @@ final class SetupManager {
 
     /// Ensure Codex config.toml has notify setting
     private func ensureCodexNotifyConfig() throws {
-        let fm = FileManager.default
-        let configPath = Self.codexConfigFile.path
-        let notifyLine = "notify = [\"python3\", \"\(Self.codexNotifyScript.path)\"]"
+        try editCodexConfig(label: "notify") {
+            try CodexConfigEditor.ensuringRootNotify(in: $0, scriptPath: Self.codexNotifyScript.path)
+        }
+    }
 
-        // Create .codex dir if needed
+    /// Apply a structural edit to ~/.codex/config.toml.
+    /// The file is only replaced when the edit changed it and the result
+    /// still scans as consistent, and the previous version is kept beside it.
+    /// Input the editor will not touch is left exactly as it was.
+    private func editCodexConfig(label: String, _ edit: (String) throws -> CodexConfigEditor.Edit) throws {
+        let fm = FileManager.default
+        let configURL = Self.codexConfigFile
         try fm.createDirectory(at: Self.codexDir, withIntermediateDirectories: true)
 
-        if fm.fileExists(atPath: configPath) {
-            var content = try String(contentsOfFile: configPath, encoding: .utf8)
-
-            // Check if notify already configured with our script
-            if content.contains(Self.codexNotifyScript.path) {
-                DebugLog.log("[SetupManager] Codex notify already configured")
-                return
-            }
-
-            // Check if notify line exists
-            if content.contains("notify = ") {
-                // Replace existing notify line
-                let lines = content.components(separatedBy: "\n")
-                let updated = lines.map { line in
-                    line.trimmingCharacters(in: .whitespaces).hasPrefix("notify = ") ? notifyLine : line
-                }
-                content = updated.joined(separator: "\n")
-            } else {
-                // Append notify line
-                content += "\n\n# CC Status Bar integration\n\(notifyLine)\n"
-            }
-            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
-            DebugLog.log("[SetupManager] Updated Codex config with notify setting")
-        } else {
-            // Create new config
-            let content = "# CC Status Bar integration\n\(notifyLine)\n"
-            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
-            DebugLog.log("[SetupManager] Created Codex config with notify setting")
+        let original = fm.fileExists(atPath: configURL.path)
+            ? try String(contentsOf: configURL, encoding: .utf8)
+            : ""
+        let result: CodexConfigEditor.Edit
+        do {
+            result = try edit(original)
+        } catch let CodexConfigEditor.EditError.unsupported(reason) {
+            DebugLog.log("[SetupManager] Codex config left untouched (\(label)): it uses \(reason), which this setup will not edit around. Add the setting by hand.")
+            return
         }
+        for note in result.notes {
+            DebugLog.log("[SetupManager] Codex config (\(label)): \(note)")
+        }
+        guard result.content != original else { return }
+        guard CodexConfigEditor.isConsistent(result.content) else {
+            DebugLog.log("[SetupManager] Codex config left untouched (\(label)): the edited result did not validate")
+            return
+        }
+        if !original.isEmpty {
+            let backup = configURL.appendingPathExtension("ccsb-backup")
+            try? fm.removeItem(at: backup)
+            try fm.copyItem(at: configURL, to: backup)
+        }
+        try result.content.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Codex Hooks Integration
@@ -831,36 +833,8 @@ final class SetupManager {
 
     /// Ensure config.toml has features.codex_hooks = true
     private func ensureCodexHooksFeatureFlag() throws {
-        let fm = FileManager.default
-        let configPath = Self.codexConfigFile.path
-        let featureLine = "codex_hooks = true"
-
-        try fm.createDirectory(at: Self.codexDir, withIntermediateDirectories: true)
-
-        if fm.fileExists(atPath: configPath) {
-            var content = try String(contentsOfFile: configPath, encoding: .utf8)
-
-            if content.contains(featureLine) {
-                DebugLog.log("[SetupManager] Codex hooks feature flag already set")
-                return
-            }
-
-            if content.contains("[features]") {
-                // Add under existing [features] section
-                content = content.replacingOccurrences(
-                    of: "[features]",
-                    with: "[features]\n\(featureLine)"
-                )
-            } else {
-                // Add new [features] section
-                content += "\n\n[features]\n\(featureLine)\n"
-            }
-            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
-            DebugLog.log("[SetupManager] Added Codex hooks feature flag")
-        } else {
-            let content = "[features]\n\(featureLine)\n"
-            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
-            DebugLog.log("[SetupManager] Created Codex config with hooks feature flag")
+        try editCodexConfig(label: "codex_hooks") {
+            try CodexConfigEditor.ensuringHooksFeatureFlag(in: $0)
         }
     }
 
