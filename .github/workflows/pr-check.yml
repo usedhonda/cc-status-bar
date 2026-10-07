@@ -22,7 +22,7 @@ jobs:
       - name: SwiftLint
         run: |
           brew install swiftlint
-          swiftlint lint --reporter github-actions
+          swiftlint lint --reporter github-actions-logging
 
       - name: Run Tests
         run: ./scripts/test.sh

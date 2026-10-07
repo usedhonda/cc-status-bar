@@ -24,6 +24,8 @@ disabled_rules:
 line_length:
   warning: 200
   error: 250
+  # JSONL fixtures in tests must stay on one line
+  ignores_multiline_strings: true
 
 type_name:
   min_length: 2
