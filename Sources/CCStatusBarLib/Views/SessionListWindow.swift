@@ -428,9 +428,10 @@ struct PinnedSessionRowView: View {
     @AppStorage("sessionDisplayMode", store: AppSettings.userDefaultsStore)
     private var displayModeRaw: String = "project"
 
-    private var env: FocusEnvironment {
-        EnvironmentResolver.shared.resolve(session: session)
-    }
+    /// Resolved outside `body`. Resolving can run a synchronous AppleScript,
+    /// which spins a nested run loop; doing that while SwiftUI evaluates the
+    /// body let display-cycle observers re-enter and crash (issue #13).
+    @State private var env: FocusEnvironment = .unknown
 
     /// Computed display text based on sessionDisplayMode setting
     private var displayText: String {
@@ -478,7 +479,7 @@ struct PinnedSessionRowView: View {
                     .truncationMode(.middle)
 
                 HStack(spacing: 4) {
-                    Text(session.environmentLabel)
+                    Text(env.displayName)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(Color(white: 0.5))
 
@@ -551,6 +552,10 @@ struct PinnedSessionRowView: View {
                 }
             }
         }
+        .task(id: "\(session.id)|\(session.updatedAt.timeIntervalSince1970)") {
+            await Task.yield()
+            env = EnvironmentResolver.shared.resolve(session: session)
+        }
     }
 
     private var displayStatus: SessionStatus {
@@ -613,9 +618,10 @@ struct PinnedCodexSessionRowView: View {
         return codexSession.displayText(for: mode)
     }
 
-    private var env: FocusEnvironment {
-        CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
-    }
+    /// Resolved outside `body`. Resolving can run a synchronous AppleScript,
+    /// which spins a nested run loop; doing that while SwiftUI evaluates the
+    /// body let display-cycle observers re-enter and crash (issue #13).
+    @State private var env: FocusEnvironment = .unknown
 
     private var status: CodexStatus {
         CodexStatusReceiver.shared.getStatus(for: codexSession.cwd)
@@ -729,6 +735,10 @@ struct PinnedCodexSessionRowView: View {
                     NSPasteboard.general.setString(tty, forType: .string)
                 }
             }
+        }
+        .task(id: codexSession.id) {
+            await Task.yield()
+            env = CodexFocusHelper.resolveEnvironmentForIcon(session: codexSession)
         }
     }
 
