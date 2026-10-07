@@ -339,6 +339,9 @@ CCStatusBar list
 CCStatusBar emit --tool aider --event session.start --session-id abc123
 ```
 
+Uninstall removes CC Status Bar's hook commands while preserving other commands
+and matcher settings in shared Claude Code hook groups.
+
 ## Security & Privacy
 
 ### Data Collection
