@@ -511,6 +511,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkeyItem.state = hotkeyEnabled ? .on : .off
         menu.addItem(hotkeyItem)
 
+        let changeHotkeyItem = NSMenuItem(
+            title: "Change Hotkey…",
+            action: #selector(changeGlobalHotkey(_:)),
+            keyEquivalent: ""
+        )
+        changeHotkeyItem.target = self
+        menu.addItem(changeHotkeyItem)
+
         // Color Theme submenu
         let colorThemeItem = NSMenuItem(title: "Color Theme", action: nil, keyEquivalent: "")
         colorThemeItem.submenu = createColorThemeMenu()
@@ -599,6 +607,28 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.state = newState ? .on : .off
         DebugLog.log("[AppDelegate] Global hotkey \(newState ? "enabled" : "disabled")")
         refreshUI()  // Update menu to show/hide hotkey description
+    }
+
+    @MainActor @objc private func changeGlobalHotkey(_ sender: NSMenuItem) {
+        let manager = HotkeyManager.shared
+        // Let the current shortcut be pressed in the recorder without firing.
+        manager.unregister()
+        guard let recorded = HotkeyRecorder.run(current: manager.hotkeyDescription) else {
+            manager.register()
+            return
+        }
+
+        if manager.update(keyCode: recorded.keyCode, modifiers: recorded.modifiers) {
+            DebugLog.log("[AppDelegate] Global hotkey changed to \(manager.hotkeyDescription)")
+        } else {
+            let attempted = HotkeyManager.describe(keyCode: recorded.keyCode, modifiers: recorded.modifiers)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Could not register \(attempted)"
+            alert.informativeText = "macOS did not accept this shortcut. The previous setting is kept."
+            alert.runModal()
+        }
+        refreshUI()
     }
 
     private func createKeepWarmMenu() -> NSMenu {

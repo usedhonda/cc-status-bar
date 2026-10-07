@@ -71,6 +71,10 @@ final class HotkeyManager: ObservableObject {
 
         guard regStatus == noErr else {
             DebugLog.log("[HotkeyManager] Failed to register hotkey: \(regStatus)")
+            if let eventHandler = eventHandler {
+                RemoveEventHandler(eventHandler)
+                self.eventHandler = nil
+            }
             return
         }
 
@@ -123,46 +127,129 @@ final class HotkeyManager: ObservableObject {
     }
 
     var savedKeyCode: UInt32 {
-        get {
-            let value = UserDefaults.standard.integer(forKey: keyCodeKey)
-            return value > 0 ? UInt32(value) : defaultKeyCode
-        }
-        set {
-            UserDefaults.standard.set(Int(newValue), forKey: keyCodeKey)
-            reregister()
-        }
+        Self.storedKeyCode(UserDefaults.standard.object(forKey: keyCodeKey), default: defaultKeyCode)
     }
 
     var savedModifiers: UInt32 {
-        get {
-            let value = UserDefaults.standard.integer(forKey: modifiersKey)
-            return value > 0 ? UInt32(value) : defaultModifiers
-        }
-        set {
-            UserDefaults.standard.set(Int(newValue), forKey: modifiersKey)
-            reregister()
-        }
+        let value = UserDefaults.standard.integer(forKey: modifiersKey)
+        return value > 0 ? UInt32(value) : defaultModifiers
+    }
+
+    /// Key code 0 is a real key (A), so only a missing value means "default".
+    static func storedKeyCode(_ stored: Any?, default defaultKeyCode: UInt32) -> UInt32 {
+        guard let value = stored as? Int, value >= 0 else { return defaultKeyCode }
+        return UInt32(value)
+    }
+
+    /// Switch to a new combination and turn the hotkey on.
+    /// If macOS refuses it, the previous settings are restored and false is returned.
+    @discardableResult
+    func update(keyCode: UInt32, modifiers: UInt32) -> Bool {
+        let defaults = UserDefaults.standard
+        let previous = (keyCode: savedKeyCode, modifiers: savedModifiers, enabled: isEnabled)
+
+        unregister()
+        defaults.set(Int(keyCode), forKey: keyCodeKey)
+        defaults.set(Int(modifiers), forKey: modifiersKey)
+        defaults.set(true, forKey: enabledKey)
+        register()
+        if isRegistered { return true }
+
+        defaults.set(Int(previous.keyCode), forKey: keyCodeKey)
+        defaults.set(Int(previous.modifiers), forKey: modifiersKey)
+        defaults.set(previous.enabled, forKey: enabledKey)
+        register()
+        return false
+    }
+
+    /// Carbon modifier mask for an AppKit key event.
+    static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        var modifiers: UInt32 = 0
+        if flags.contains(.command) { modifiers |= UInt32(cmdKey) }
+        if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
+        if flags.contains(.option) { modifiers |= UInt32(optionKey) }
+        if flags.contains(.control) { modifiers |= UInt32(controlKey) }
+        return modifiers
+    }
+
+    /// A global hotkey needs ⌘, ⌃ or ⌥; a bare key or ⇧ alone is ordinary typing.
+    static func isAcceptableHotkey(modifiers: UInt32) -> Bool {
+        modifiers & UInt32(cmdKey | controlKey | optionKey) != 0
     }
 
     /// Get human-readable hotkey description
     var hotkeyDescription: String {
+        Self.describe(keyCode: savedKeyCode, modifiers: savedModifiers)
+    }
+
+    static func describe(keyCode: UInt32, modifiers mods: UInt32) -> String {
         var parts: [String] = []
 
-        let mods = savedModifiers
         if mods & UInt32(cmdKey) != 0 { parts.append("⌘") }
         if mods & UInt32(shiftKey) != 0 { parts.append("⇧") }
         if mods & UInt32(optionKey) != 0 { parts.append("⌥") }
         if mods & UInt32(controlKey) != 0 { parts.append("⌃") }
 
         // Convert keyCode to character
-        let keyCode = savedKeyCode
-        let keyChar = keyCodeToCharacter(keyCode)
-        parts.append(keyChar)
+        parts.append(keyCodeToCharacter(keyCode))
 
         return parts.joined()
     }
 
-    private func keyCodeToCharacter(_ keyCode: UInt32) -> String {
+    /// The character this key produces on the current keyboard layout.
+    private static func layoutCharacter(_ keyCode: UInt32) -> String? {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return nil
+        }
+        let layoutData = unsafeBitCast(property, to: CFData.self)
+        guard let bytes = CFDataGetBytePtr(layoutData) else { return nil }
+        var deadKeyState: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let status = bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in
+            UCKeyTranslate(
+                layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeyState, chars.count, &length, &chars
+            )
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let text = String(utf16CodeUnits: chars, count: length)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.controlCharacters))
+        return text.isEmpty ? nil : text.uppercased()
+    }
+
+    private static func keyCodeToCharacter(_ keyCode: UInt32) -> String {
+        switch Int(keyCode) {
+        case kVK_Delete: return "Delete"
+        case kVK_ForwardDelete: return "Fwd Delete"
+        case kVK_LeftArrow: return "←"
+        case kVK_RightArrow: return "→"
+        case kVK_UpArrow: return "↑"
+        case kVK_DownArrow: return "↓"
+        case kVK_Home: return "Home"
+        case kVK_End: return "End"
+        case kVK_PageUp: return "Page Up"
+        case kVK_PageDown: return "Page Down"
+        case kVK_F1: return "F1"
+        case kVK_F2: return "F2"
+        case kVK_F3: return "F3"
+        case kVK_F4: return "F4"
+        case kVK_F5: return "F5"
+        case kVK_F6: return "F6"
+        case kVK_F7: return "F7"
+        case kVK_F8: return "F8"
+        case kVK_F9: return "F9"
+        case kVK_F10: return "F10"
+        case kVK_F11: return "F11"
+        case kVK_F12: return "F12"
+        case kVK_Space: return "Space"
+        case kVK_Return: return "Return"
+        case kVK_Tab: return "Tab"
+        case kVK_Escape: return "Esc"
+        default: break
+        }
+        if let character = layoutCharacter(keyCode) { return character }
         switch Int(keyCode) {
         case kVK_ANSI_A: return "A"
         case kVK_ANSI_B: return "B"
@@ -200,11 +287,7 @@ final class HotkeyManager: ObservableObject {
         case kVK_ANSI_7: return "7"
         case kVK_ANSI_8: return "8"
         case kVK_ANSI_9: return "9"
-        case kVK_Space: return "Space"
-        case kVK_Return: return "Return"
-        case kVK_Tab: return "Tab"
-        case kVK_Escape: return "Esc"
-        default: return "?"
+        default: return "Key \(keyCode)"
         }
     }
 
