@@ -46,6 +46,20 @@ struct CodexRefreshResult<Value> {
     let succeeded: Bool
 }
 
+/// First caller wins; lets two racing tasks resume one continuation exactly once.
+final class CodexResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
 /// A bounded, single-flight refresh coordinator used by the live Codex snapshot.
 /// It never exposes stale values to callers waiting for an authoritative snapshot.
 final class CodexRefreshCoordinator<Value>: @unchecked Sendable {
@@ -102,16 +116,20 @@ final class CodexRefreshCoordinator<Value>: @unchecked Sendable {
         let emptyGeneration = prepared.generation
         let staleAge = prepared.staleAge
 
-        let refresh = await withTaskGroup(of: CodexRefreshResult<Value>?.self) { group in
-            group.addTask { await task.value }
-            group.addTask {
-                let nanoseconds = UInt64(max(0, deadline) * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: nanoseconds)
-                return nil
+        // Race the refresh against the deadline with unstructured tasks. A
+        // task group would not do: it waits for every child before returning,
+        // so a refresh that never finishes made the deadline never fire and a
+        // new subscriber never got its session list.
+        let refresh: CodexRefreshResult<Value>? = await withCheckedContinuation { continuation in
+            let once = CodexResumeOnce()
+            let finish: @Sendable (CodexRefreshResult<Value>?) -> Void = { value in
+                if once.claim() { continuation.resume(returning: value) }
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+            Task.detached { finish(await task.value) }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, deadline) * 1_000_000_000))
+                finish(nil)
+            }
         }
 
         guard let refresh else {
@@ -988,23 +1006,15 @@ enum CodexObserver {
     /// Uses DispatchSemaphore instead of waitUntilExit() to avoid spinning the
     /// CFRunLoop, which can trigger re-entrant SwiftUI layout and crash.
     private static func runCommand(_ executable: String, _ args: [String]) -> String {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = Array(args)
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            let semaphore = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in semaphore.signal() }
-            try process.run()
-            semaphore.wait()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
-        } catch {
+        // Bounded and killed on the deadline. This used to wait forever, and
+        // one hung `lsof` froze every later scan (see BoundedProcess).
+        guard let result = BoundedProcess.run(
+            executable: URL(fileURLWithPath: executable), arguments: Array(args), timeout: 5
+        ) else {
+            DebugLog.log("[CodexObserver] Command timed out or failed to start (5s): \(executable) \(args)")
             return ""
         }
+        return String(data: result.stdout, encoding: .utf8) ?? ""
     }
 }
 

@@ -10,6 +10,7 @@ final class WebServer {
     private(set) var actualPort: UInt16 = 0
     private let basePort: UInt16 = 8080
     private let maxPortAttempts = 10
+    private var watchdog: DispatchSourceTimer?
 
     private init() {}
 
@@ -56,6 +57,7 @@ final class WebServer {
                 server = httpServer
                 actualPort = port
                 DebugLog.log("[WebServer] Started on port \(port)")
+                startWatchdog()
                 return
             } catch {
                 lastError = error
@@ -67,8 +69,49 @@ final class WebServer {
         throw lastError ?? WebServerError.noAvailablePort
     }
 
+    /// Whether the listening socket is actually alive.
+    ///
+    /// Swifter ends its accept loop, and closes the listener, on the first
+    /// failed accept (out of file descriptors, an aborted connection) without
+    /// telling anyone. `isRunning` stays true, so only this tells the truth.
+    var isListening: Bool {
+        server?.operating ?? false
+    }
+
+    /// Bring the listener back if it died behind our back. Returns true when
+    /// it had to restart.
+    @discardableResult
+    func ensureListening() -> Bool {
+        guard server != nil, !isListening else { return false }
+        DebugLog.log("[WebServer] Listener on port \(actualPort) died; restarting")
+        server = nil
+        actualPort = 0
+        do {
+            try start()
+        } catch {
+            DebugLog.log("[WebServer] Restart failed: \(error.localizedDescription)")
+        }
+        return true
+    }
+
+    private func startWatchdog() {
+        guard watchdog == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 15, repeating: 15)
+        timer.setEventHandler { [weak self] in self?.ensureListening() }
+        timer.resume()
+        watchdog = timer
+    }
+
+    /// Close the listener the way a failed accept does. For tests.
+    func killListenerForTesting() {
+        server?.stop()
+    }
+
     /// Stop the web server
     func stop() {
+        watchdog?.cancel()
+        watchdog = nil
         server?.stop()
         server = nil
         let port = actualPort
