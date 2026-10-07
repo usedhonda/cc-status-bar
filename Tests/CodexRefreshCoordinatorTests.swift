@@ -81,6 +81,23 @@ final class CodexRefreshCoordinatorTests: XCTestCase {
         XCTAssertEqual(corrected.value, "corrected")
     }
 
+    /// A scan once hung for days on a stuck `lsof`. The deadline was raced in a
+    /// task group, which waits for every child, so it never fired and a new
+    /// subscriber never received its session list.
+    func testTheDeadlineFiresEvenWhenTheScanNeverFinishes() async {
+        let coordinator = CodexRefreshCoordinator<String> {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            return "never"
+        }
+
+        let started = Date()
+        let snapshot = await coordinator.snapshot(deadline: 0.2)
+
+        XCTAssertNil(snapshot.value)
+        XCTAssertEqual(snapshot.source, "deadline")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
+
     func testOldRefreshCannotOverwriteNewGeneration() async {
         let scans = LockedBox(0)
         let coordinator = CodexRefreshCoordinator<String> {

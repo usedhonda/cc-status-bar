@@ -690,55 +690,32 @@ enum TmuxHelper {
     }
 
     private static func runCommand(_ executable: String, _ args: [String]) -> String {
-        let process = Process()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-
+        let url: URL
+        let arguments: [String]
         if executable.contains("/") {
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = Array(args)
+            url = URL(fileURLWithPath: executable)
+            arguments = Array(args)
         } else {
             // Fallback to PATH lookup (important when tmux is not in hardcoded locations)
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [executable] + Array(args)
+            url = URL(fileURLWithPath: "/usr/bin/env")
+            arguments = [executable] + Array(args)
         }
 
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        do {
-            // Use DispatchSemaphore instead of waitUntilExit(). waitUntilExit
-            // spins CFRunLoop which can process display-cycle events → SwiftUI
-            // layout → body evaluation → more runCommand calls, crashing via
-            // NULL observer callback in UpdateCycle.
-            let semaphore = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in semaphore.signal() }
-            try process.run()
-            let waitResult = semaphore.wait(timeout: .now() + 5)
-            if waitResult == .timedOut {
-                DebugLog.log("[TmuxHelper] Command timed out (5s): \(executable) \(args)")
-                process.terminate()
-                return ""
-            }
-
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let errorOutput = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            if process.terminationStatus != 0 {
-                if errorOutput.isEmpty {
-                    DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args)")
-                } else {
-                    DebugLog.log("[TmuxHelper] Command failed (\(process.terminationStatus)): \(executable) \(args) | \(errorOutput)")
-                }
-            }
-
-            return output
-        } catch {
-            DebugLog.log("[TmuxHelper] Command failed: \(executable) \(args)")
+        // Bounded, and killed on the deadline: a tmux client that hangs must
+        // not stay behind holding pipes (see BoundedProcess).
+        guard let result = BoundedProcess.run(executable: url, arguments: arguments, timeout: 5) else {
+            DebugLog.log("[TmuxHelper] Command timed out or failed to start (5s): \(executable) \(args)")
             return ""
         }
+        if result.status != 0 {
+            let errorOutput = String(data: result.stderr, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if errorOutput.isEmpty {
+                DebugLog.log("[TmuxHelper] Command failed (\(result.status)): \(executable) \(args)")
+            } else {
+                DebugLog.log("[TmuxHelper] Command failed (\(result.status)): \(executable) \(args) | \(errorOutput)")
+            }
+        }
+        return String(data: result.stdout, encoding: .utf8) ?? ""
     }
 }

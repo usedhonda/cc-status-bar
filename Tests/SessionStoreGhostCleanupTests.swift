@@ -304,14 +304,14 @@ extension SessionStoreGhostCleanupTests {
     }
 }
 
-/// `claude agents` runs through runBounded. The old runner leaked a blocked
+/// Every helper command runs through BoundedProcess. The old runner leaked a blocked
 /// thread per timeout and never drained its pipes, which exhausted GCD's 64
 /// threads and hung the web server after a few days.
 final class BoundedProcessTests: XCTestCase {
     private let sh = URL(fileURLWithPath: "/bin/sh")
 
     func testOutputLargerThanThePipeBufferIsReadInFull() throws {
-        let result = try XCTUnwrap(SessionStore.runBounded(
+        let result = try XCTUnwrap(BoundedProcess.run(
             executable: sh, arguments: ["-c", "head -c 300000 /dev/zero | tr '\\\\0' x"], timeout: 5))
         XCTAssertEqual(result.status, 0)
         XCTAssertEqual(result.stdout.count, 300_000)
@@ -320,7 +320,7 @@ final class BoundedProcessTests: XCTestCase {
     func testAChildThatOverrunsTheDeadlineIsKilledAndDoesNotBlock() {
         let started = Date()
         // Ignores SIGTERM, so only the SIGKILL fallback can end it.
-        let result = SessionStore.runBounded(
+        let result = BoundedProcess.run(
             executable: sh, arguments: ["-c", "trap '' TERM; sleep 30"], timeout: 0.5, killGrace: 0.5)
         XCTAssertNil(result)
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
