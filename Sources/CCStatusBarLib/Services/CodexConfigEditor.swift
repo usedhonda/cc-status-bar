@@ -8,8 +8,8 @@ import Foundation
 /// `codex_hooks = false` (a duplicate key, which is invalid TOML).
 ///
 /// This is a line scanner, not a TOML parser. It understands table headers,
-/// keys and multi-line arrays, and refuses anything else it cannot place
-/// safely (multi-line strings) instead of guessing.
+/// keys, multi-line arrays and multi-line strings, and refuses a file it
+/// cannot follow (an unterminated array or string) instead of guessing.
 enum CodexConfigEditor {
     enum EditError: Error, Equatable {
         /// The file uses a construct this editor will not edit around.
@@ -97,6 +97,13 @@ enum CodexConfigEditor {
             return Edit(content: render(lines), notes: notes)
         }
 
+        if lines.contains(where: { $0.table != "features" && $0.key == "codex_hooks" }) {
+            // Someone put the key outside [features]. Whatever they meant by
+            // it, adding a second one elsewhere is not ours to decide.
+            notes.append("codex_hooks is set outside [features], where Codex does not read it; left as is")
+            return Edit(content: render(lines), notes: notes)
+        }
+
         if let header = lines.firstIndex(where: { $0.isHeader && $0.table == "features" }) {
             lines.insert(ScannedLine(text: "codex_hooks = true"), at: header + 1)
         } else {
@@ -135,18 +142,45 @@ enum CodexConfigEditor {
     }
 
     static func scannedLines(_ content: String) throws -> [ScannedLine] {
-        if content.contains("\"\"\"") || content.contains("'''") {
-            throw EditError.unsupported("multi-line strings")
-        }
         var result: [ScannedLine] = []
         var table: String?
         var depth = 0
         var openKeyIndex: Int?
+        // Delimiter of the multi-line string we are inside, if any. Its body
+        // is opaque: a line in it that looks like a table header is not one.
+        var openString: String?
 
         let raw = content.components(separatedBy: "\n")
         for (number, text) in raw.enumerated() {
             var line = ScannedLine(text: text, number: number, table: table)
-            let code = strippingStringsAndComment(text)
+
+            if let delimiter = openString {
+                if text.components(separatedBy: delimiter).count % 2 == 0 {
+                    openString = nil
+                    if depth == 0, let open = openKeyIndex {
+                        result[open].valueEnd = result.count
+                        openKeyIndex = nil
+                    }
+                }
+                result.append(line)
+                continue
+            }
+
+            // Blank out triple-quoted segments; an unclosed one opens a
+            // multi-line string that runs on from this line.
+            var visible = text
+            for delimiter in ["\"\"\"", "'''"] {
+                let parts = visible.components(separatedBy: delimiter)
+                guard parts.count > 1 else { continue }
+                visible = parts.enumerated().map { $0.offset % 2 == 0 ? $0.element : "" }.joined(separator: " ")
+                if parts.count % 2 == 0 {
+                    openString = delimiter
+                    visible = parts.dropLast().enumerated()
+                        .map { $0.offset % 2 == 0 ? $0.element : "" }.joined(separator: " ")
+                }
+                break
+            }
+            let code = strippingStringsAndComment(visible)
             let trimmed = code.trimmingCharacters(in: .whitespaces)
 
             if depth > 0 {
@@ -167,11 +201,12 @@ enum CodexConfigEditor {
                 line.key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
                 line.valueEnd = result.count
                 depth = max(0, bracketDelta(String(trimmed[trimmed.index(after: equals)...])))
-                if depth > 0 { openKeyIndex = result.count }
+                if depth > 0 || openString != nil { openKeyIndex = result.count }
             }
             result.append(line)
         }
         if depth > 0 { throw EditError.unsupported("an unterminated array") }
+        if openString != nil { throw EditError.unsupported("an unterminated multi-line string") }
         return result
     }
 

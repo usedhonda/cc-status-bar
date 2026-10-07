@@ -35,6 +35,13 @@ final class CodexConfigEditorTests: XCTestCase {
         XCTAssertEqual(again.content, fresh.content, "idempotent")
     }
 
+    func testAHooksKeyOutsideTheFeaturesTableIsNotSecondGuessed() throws {
+        let input = "codex_hooks = true\n\n[features]\nother = 1\n"
+        let edit = try CodexConfigEditor.ensuringHooksFeatureFlag(in: input)
+        XCTAssertEqual(edit.content, input)
+        XCTAssertFalse(edit.notes.isEmpty)
+    }
+
     func testNotifyGoesToTheRootEvenWhenTheFileEndsInATable() throws {
         let input = "[projects.\"/tmp/fixture-project\"]\ntrust_level = \"trusted\"\n"
         let edit = try CodexConfigEditor.ensuringRootNotify(in: input, scriptPath: script)
@@ -76,10 +83,24 @@ final class CodexConfigEditorTests: XCTestCase {
         XCTAssertTrue(inTable.isEmpty)
     }
 
-    func testMultiLineStringsAreRefusedRatherThanGuessedAt() {
-        let input = "instructions = \"\"\"\n[looks like a table]\n\"\"\"\n"
-        XCTAssertThrowsError(try CodexConfigEditor.ensuringRootNotify(in: input, scriptPath: script)) { error in
-            XCTAssertEqual(error as? CodexConfigEditor.EditError, .unsupported("multi-line strings"))
+    /// Real configs carry multi-line strings (instructions, prompts). A line
+    /// inside one that looks like a table header is not a table.
+    func testATableLookalikeInsideAMultiLineStringIsNotATable() throws {
+        let input = "instructions = \"\"\"\n[looks like a table]\nnotify = \"no\"\n\"\"\"\n\n[features]\nother = 1\n"
+        let edit = try CodexConfigEditor.ensuringRootNotify(in: input, scriptPath: script)
+        XCTAssertEqual(
+            edit.content,
+            "instructions = \"\"\"\n[looks like a table]\nnotify = \"no\"\n\"\"\"\n\n"
+                + "\(CodexConfigEditor.comment)\nnotify = [\"python3\", \"\(script)\"]\n\n[features]\nother = 1\n"
+        )
+        let flag = try CodexConfigEditor.ensuringHooksFeatureFlag(in: edit.content)
+        XCTAssertTrue(flag.content.contains("[features]\ncodex_hooks = true\nother = 1"))
+        XCTAssertTrue(CodexConfigEditor.isConsistent(flag.content))
+    }
+
+    func testAnUnterminatedMultiLineStringIsRefused() {
+        XCTAssertThrowsError(try CodexConfigEditor.ensuringRootNotify(in: "a = \"\"\"\nnever closed\n", scriptPath: script)) { error in
+            XCTAssertEqual(error as? CodexConfigEditor.EditError, .unsupported("an unterminated multi-line string"))
         }
     }
 }
