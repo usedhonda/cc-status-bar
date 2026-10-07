@@ -891,6 +891,23 @@ final class SetupManager {
 
     // MARK: - Cleanup (for uninstall)
 
+    static func removingOwnHooks(from eventHooks: [[String: Any]]) -> [[String: Any]] {
+        eventHooks.compactMap { entry in
+            guard let innerHooks = entry["hooks"] as? [[String: Any]] else {
+                return entry
+            }
+            let remainingHooks = innerHooks.filter { hook in
+                guard let command = hook["command"] as? String else { return true }
+                return !isOwnHookCommand(command)
+            }
+            guard remainingHooks.count != innerHooks.count else { return entry }
+            guard !remainingHooks.isEmpty else { return nil }
+            var remainingEntry = entry
+            remainingEntry["hooks"] = remainingHooks
+            return remainingEntry
+        }
+    }
+
     func removeHooksFromSettings() throws {
         guard FileManager.default.fileExists(atPath: Self.settingsFile.path) else {
             return
@@ -905,15 +922,7 @@ final class SetupManager {
         // Remove our hooks
         for eventName in Self.hookEvents {
             if let eventHooks = hooks[eventName] {
-                let filtered = eventHooks.filter { entry in
-                    guard let innerHooks = entry["hooks"] as? [[String: Any]] else {
-                        return true
-                    }
-                    return !innerHooks.contains { hook in
-                        guard let command = hook["command"] as? String else { return false }
-                        return Self.isOwnHookCommand(command)
-                    }
-                }
+                let filtered = Self.removingOwnHooks(from: eventHooks)
                 if filtered.isEmpty {
                     hooks.removeValue(forKey: eventName)
                 } else {
