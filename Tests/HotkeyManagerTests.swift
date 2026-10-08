@@ -41,4 +41,12 @@ final class HotkeyManagerTests: XCTestCase {
             "⌥⌃F5"
         )
     }
+
+    func testStoredKeyCodeOutsideEventKeyRangeFallsBack() {
+        let fallback = UInt32(kVK_ANSI_C)
+        XCTAssertEqual(HotkeyManager.storedKeyCode(65_536, default: fallback), fallback)
+        XCTAssertEqual(HotkeyManager.storedKeyCode(Int.max, default: fallback), fallback)
+        XCTAssertEqual(HotkeyManager.storedKeyCode(-1, default: fallback), fallback)
+        XCTAssertEqual(HotkeyManager.describe(keyCode: 65_536, modifiers: 0), "Key 65536")
+    }
 }

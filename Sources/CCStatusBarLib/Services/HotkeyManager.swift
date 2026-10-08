@@ -137,7 +137,7 @@ final class HotkeyManager: ObservableObject {
 
     /// Key code 0 is a real key (A), so only a missing value means "default".
     static func storedKeyCode(_ stored: Any?, default defaultKeyCode: UInt32) -> UInt32 {
-        guard let value = stored as? Int, value >= 0 else { return defaultKeyCode }
+        guard let value = stored as? Int, value >= 0, value <= Int(UInt16.max) else { return defaultKeyCode }
         return UInt32(value)
     }
 
@@ -198,6 +198,7 @@ final class HotkeyManager: ObservableObject {
 
     /// The character this key produces on the current keyboard layout.
     private static func layoutCharacter(_ keyCode: UInt32) -> String? {
+        guard let eventKeyCode = UInt16(exactly: keyCode) else { return nil }
         guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
               let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
             return nil
@@ -209,7 +210,7 @@ final class HotkeyManager: ObservableObject {
         var length = 0
         let status = bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in
             UCKeyTranslate(
-                layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                layout, eventKeyCode, UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
                 OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeyState, chars.count, &length, &chars
             )
         }

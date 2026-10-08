@@ -31,6 +31,9 @@ Access the submenu for quick actions:
 - **Copy Attach Command** - For detached tmux sessions
 
 #### Global Hotkey
+Invalid saved key codes fall back to the default shortcut; displaying an unknown
+key code does not crash the app.
+
 Enable **⌘⇧C** (Cmd+Shift+C) in Settings to quickly focus waiting sessions without using the menu bar.
 
 When triggered:
