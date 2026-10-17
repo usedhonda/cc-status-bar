@@ -682,7 +682,7 @@ enum CodexObserver {
                         paneID: row.paneID, panePID: row.panePID,
                         panePIDStart: processStartToken(for: row.panePID), agentPID: agentPID,
                         agentPIDStart: agentStart, session: row.session, window: row.window,
-                        pane: row.pane, socketPath: socket
+                        pane: row.pane, socketPath: socketPath
                     )
                 }
             }

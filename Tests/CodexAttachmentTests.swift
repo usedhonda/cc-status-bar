@@ -37,6 +37,15 @@ final class CodexAttachmentTests: XCTestCase {
             agentStartBefore: "agent-start", agentStartAfter: "agent-start", paneStartAfter: "pane-start"))
     }
 
+    func testFeedPreservesDefaultSocketAttachCommandShape() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Sources/CCStatusBarLib/Services/CodexObserver.swift"))
+        // Canonicalize only the deduplication key. Preserve nil for the default
+        // socket so existing clients keep their active-pane attach option.
+        XCTAssertTrue(source.contains("pane: row.pane, socketPath: socketPath"))
+        XCTAssertFalse(source.contains("pane: row.pane, socketPath: socket\n"))
+    }
+
     func testAttachmentCacheDoesNotReplaceStrictIdentityCache() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CCStatusBarLib/Services/CodexObserver.swift"))
