@@ -517,7 +517,7 @@ final class WebSocketManager {
 
         // Active Codex panes require stable live evidence. Do not fall back to
         // a pane index from an older process or tmux snapshot.
-        if let stable = CodexObserver.stableTmuxInfo(for: session) {
+        if let stable = CodexObserver.attachmentTmuxInfo(for: session) {
             let attachCmd = TmuxAttachCommand.buildFull(
                 sessionName: stable.session, window: stable.window, pane: stable.pane, socketPath: stable.socketPath
             )

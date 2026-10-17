@@ -35,6 +35,7 @@ struct CodexStableTmuxInfo: Equatable {
 private struct CodexScanResult {
     let sessions: [String: CodexSession]
     let paneInfoByPID: [pid_t: CodexStableTmuxInfo]
+    let attachmentInfoByPID: [pid_t: CodexStableTmuxInfo]
     let excludedCounts: [String: Int]
     let discoveredCount: Int
 }
@@ -267,6 +268,8 @@ enum CodexObserver {
         }
     )
     private static var paneInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
+    // Session-feed attachment only. Never used to authorize Poke or cache bindings.
+    private static var attachmentInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
     private static var lastDiagnostics: CodexRefreshDiagnostics?
 
     struct CodexRefreshDiagnostics: Equatable {
@@ -348,6 +351,7 @@ enum CodexObserver {
         let excluded = scan?.excludedCounts ?? [:]
         if let scan {
             paneInfoByPID = scan.paneInfoByPID
+            attachmentInfoByPID = scan.attachmentInfoByPID
         }
         let diagnostics = CodexRefreshDiagnostics(
             generation: snapshot.generation,
@@ -382,6 +386,33 @@ enum CodexObserver {
     }
 
     @MainActor
+    static func attachmentTmuxInfo(for session: CodexSession) -> CodexStableTmuxInfo? {
+        guard let info = attachmentInfoByPID[session.pid],
+              info.agentPID == session.pid,
+              let agentStart = info.agentPIDStart,
+              let paneStart = info.panePIDStart,
+              agentStart == processStartToken(for: session.pid),
+              paneStart == processStartToken(for: info.panePID) else { return nil }
+        return info
+    }
+
+    /// Candidates must already be proven process ancestors. Fail closed on any
+    /// ambiguity or missing/changed process identity; duplicate socket aliases
+    /// are collapsed by canonical socket path before candidates reach this seam.
+    static func selectAttachmentPane(
+        candidates: [CodexStableTmuxInfo], agentPID: pid_t,
+        agentStartBefore: String?, agentStartAfter: String?, paneStartAfter: String?
+    ) -> CodexStableTmuxInfo? {
+        guard candidates.count == 1, let pane = candidates.first,
+              pane.agentPID == agentPID, pane.agentPID > 0, pane.panePID > 0,
+              pane.paneID.hasPrefix("%"),
+              let before = agentStartBefore, before == agentStartAfter,
+              pane.agentPIDStart == before,
+              let paneBefore = pane.panePIDStart, paneBefore == paneStartAfter else { return nil }
+        return pane
+    }
+
+    @MainActor
     static func logCorrectiveBroadcast() {
         guard let diagnostics = lastDiagnostics else { return }
         logDiagnostics(CodexRefreshDiagnostics(
@@ -399,6 +430,7 @@ enum CodexObserver {
     @MainActor
     private static func publishScan(_ scan: CodexScanResult, generation: Int, duration: TimeInterval) {
         paneInfoByPID = scan.paneInfoByPID
+        attachmentInfoByPID = scan.attachmentInfoByPID
         let diagnostics = CodexRefreshDiagnostics(
             generation: generation,
             cacheAge: 0,
@@ -479,6 +511,7 @@ enum CodexObserver {
     private static func fetchCodexScan() -> CodexScanResult {
         var sessions: [String: CodexSession] = [:]
         var paneInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
+        var attachmentInfoByPID: [pid_t: CodexStableTmuxInfo] = [:]
 
         let pidScan = getCodexPIDScan()
         let pids = pidScan.pids
@@ -500,16 +533,24 @@ enum CodexObserver {
 
                 if let tty = getTTY(for: pid) {
                     session.tty = tty
+                    let attachmentStart = processStartToken(for: pid)
                     if let stablePane = resolveStablePane(for: pid, tty: tty) {
                         session.tmuxSession = stablePane.session
                         session.tmuxWindow = stablePane.window
                         session.tmuxPane = stablePane.pane
                         session.tmuxSocketPath = stablePane.socketPath
                         paneInfoByPID[pid] = stablePane
+                        attachmentInfoByPID[pid] = selectAttachmentPane(
+                            candidates: [stablePane], agentPID: pid,
+                            agentStartBefore: attachmentStart, agentStartAfter: processStartToken(for: pid),
+                            paneStartAfter: processStartToken(for: stablePane.panePID)
+                        )
 
                         if let terminalApp = TmuxHelper.getClientTerminalInfo(for: stablePane.session) {
                             session.terminalApp = terminalApp
                         }
+                    } else {
+                        attachmentInfoByPID[pid] = resolveAncestralAttachmentPane(for: pid)
                     }
                 }
 
@@ -521,6 +562,7 @@ enum CodexObserver {
         return CodexScanResult(
             sessions: sessions,
             paneInfoByPID: paneInfoByPID,
+            attachmentInfoByPID: attachmentInfoByPID,
             excludedCounts: pidScan.excludedCounts,
             discoveredCount: pids.count
         )
@@ -615,6 +657,43 @@ enum CodexObserver {
         let session: String
         let window: String
         let pane: String
+    }
+
+    /// A PTY proxy may change the agent's controlling terminal without moving
+    /// it out of its tmux pane. Resolve that relationship only for the feed.
+    private static func resolveAncestralAttachmentPane(for agentPID: pid_t) -> CodexStableTmuxInfo? {
+        guard let agentStart = processStartToken(for: agentPID) else { return nil }
+        var candidates: [String: CodexStableTmuxInfo] = [:]
+        for socketPath in [nil] + discoverTmuxSocketPaths().map(Optional.some) {
+            var args: [String] = []
+            if let socketPath { args += ["-S", socketPath] }
+            args += ["list-panes", "-a", "-F",
+                     "#{pane_id}\\t#{pane_pid}\\t#{pane_tty}\\t#{session_name}\\t#{window_index}\\t#{pane_index}\\t#{socket_path}"]
+            for line in runCommand(tmuxExecutable(), args).split(separator: "\n") {
+                let raw = String(line)
+                let parts = raw.components(separatedBy: raw.contains("\\t") ? "\\t" : "\t")
+                guard parts.count == 7, let row = parseLivePaneRow(line),
+                      row.paneID.hasPrefix("%"), row.panePID > 0,
+                      !parts[6].isEmpty, isProcessDescendant(agentPID, of: row.panePID) else { continue }
+                let socket = URL(fileURLWithPath: parts[6]).resolvingSymlinksInPath().standardizedFileURL.path
+                let key = "\(socket)|\(row.paneID)|\(row.panePID)"
+                if candidates[key] == nil {
+                    candidates[key] = CodexStableTmuxInfo(
+                        paneID: row.paneID, panePID: row.panePID,
+                        panePIDStart: processStartToken(for: row.panePID), agentPID: agentPID,
+                        agentPIDStart: agentStart, session: row.session, window: row.window,
+                        pane: row.pane, socketPath: socket
+                    )
+                }
+            }
+        }
+        let values = Array(candidates.values)
+        guard values.count == 1, let pane = values.first,
+              isProcessDescendant(agentPID, of: pane.panePID) else { return nil }
+        return selectAttachmentPane(
+            candidates: values, agentPID: agentPID, agentStartBefore: agentStart,
+            agentStartAfter: processStartToken(for: agentPID), paneStartAfter: processStartToken(for: pane.panePID)
+        )
     }
 
     private static func resolveStablePane(for agentPID: pid_t, tty: String) -> CodexStableTmuxInfo? {
