@@ -16,6 +16,10 @@ enum BoundedProcess {
         timeout: TimeInterval,
         killGrace: TimeInterval = 1
     ) -> (status: Int32, stdout: Data, stderr: Data)? {
+        // Background scan tasks do not provide a per-command autorelease pool.
+        // Release Foundation's pipe handles here instead of accumulating two
+        // descriptors per helper until spawning later commands fails.
+        return autoreleasepool { () -> (status: Int32, stdout: Data, stderr: Data)? in
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -73,5 +77,6 @@ enum BoundedProcess {
         let result = (process.terminationStatus, out, err)
         lock.unlock()
         return result
+        }
     }
 }
