@@ -26,11 +26,10 @@ APP_NAME="CCStatusBar"
 DMG_PATH="/tmp/${APP_NAME}.dmg"
 DMG_STAGING="/tmp/dmg-contents"
 
-# Apple credentials (from .local/release.md)
-APPLE_ID="honda@ofinventi.one"
-TEAM_ID="F588423ZWS"
-APP_PASSWORD="vyen-roli-fagw-lgmo"
-SIGNING_ID="Developer ID Application: Yuzuru Honda (${TEAM_ID})"
+# Release authentication must come from Keychain, never repository files.
+: "${CCSB_RELEASE_SIGNING_IDENTITY:?Set CCSB_RELEASE_SIGNING_IDENTITY to a Developer ID identity}"
+: "${CCSB_NOTARY_KEYCHAIN_PROFILE:?Set CCSB_NOTARY_KEYCHAIN_PROFILE to a rotated Keychain profile}"
+SIGNING_ID="$CCSB_RELEASE_SIGNING_IDENTITY"
 
 cd "$PROJECT_DIR"
 
@@ -85,9 +84,7 @@ echo ""
 # Step 6: Notarize
 echo -e "${GREEN}[6/8] Notarizing DMG (this may take a few minutes)...${NC}"
 xcrun notarytool submit "${DMG_PATH}" \
-  --apple-id "${APPLE_ID}" \
-  --team-id "${TEAM_ID}" \
-  --password "${APP_PASSWORD}" \
+  --keychain-profile "$CCSB_NOTARY_KEYCHAIN_PROFILE" \
   --wait
 echo -e "${GREEN}Notarization complete${NC}"
 echo ""
