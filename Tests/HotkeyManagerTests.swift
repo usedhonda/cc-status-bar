@@ -49,4 +49,13 @@ final class HotkeyManagerTests: XCTestCase {
         XCTAssertEqual(HotkeyManager.storedKeyCode(-1, default: fallback), fallback)
         XCTAssertEqual(HotkeyManager.describe(keyCode: 65_536, modifiers: 0), "Key 65536")
     }
+    func testStoredModifiersRejectOverflowWithoutChangingValidValues() {
+        let fallback = UInt32(cmdKey | shiftKey)
+        for value in [Int(UInt32.max) + 1, Int.max, -1, 0] {
+            XCTAssertEqual(HotkeyManager.storedModifiers(value, default: fallback), fallback)
+        }
+        XCTAssertEqual(HotkeyManager.storedModifiers(Int(UInt32.max), default: fallback), UInt32.max)
+        XCTAssertEqual(HotkeyManager.storedModifiers(Int(optionKey), default: fallback), UInt32(optionKey))
+    }
+
 }

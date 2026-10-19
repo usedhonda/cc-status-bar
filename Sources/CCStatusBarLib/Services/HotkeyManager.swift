@@ -131,14 +131,19 @@ final class HotkeyManager: ObservableObject {
     }
 
     var savedModifiers: UInt32 {
-        let value = UserDefaults.standard.integer(forKey: modifiersKey)
-        return value > 0 ? UInt32(value) : defaultModifiers
+        Self.storedModifiers(UserDefaults.standard.object(forKey: modifiersKey), default: defaultModifiers)
     }
 
     /// Key code 0 is a real key (A), so only a missing value means "default".
     static func storedKeyCode(_ stored: Any?, default defaultKeyCode: UInt32) -> UInt32 {
         guard let value = stored as? Int, value >= 0, value <= Int(UInt16.max) else { return defaultKeyCode }
         return UInt32(value)
+    }
+
+    static func storedModifiers(_ stored: Any?, default fallback: UInt32) -> UInt32 {
+        guard let value = stored as? Int, value > 0,
+              let modifiers = UInt32(exactly: value) else { return fallback }
+        return modifiers
     }
 
     /// Switch to a new combination and turn the hotkey on.
