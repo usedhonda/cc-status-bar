@@ -62,7 +62,7 @@ jobs:
           npm ci
           npm run build
           cd ..
-          streamdeck pack com.ccstatusbar.sdPlugin
+          streamdeck pack com.ccstatusbar.sdPlugin --force
 
       - name: Copy binary to app bundle
         run: |
