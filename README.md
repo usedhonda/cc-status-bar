@@ -31,7 +31,7 @@ Access the submenu for quick actions:
 - **Copy Attach Command** - For detached tmux sessions
 
 #### Global Hotkey
-Invalid saved key codes fall back to the default shortcut; displaying an unknown
+Invalid saved key codes or overflowing modifier values fall back to the default shortcut; displaying an unknown
 key code does not crash the app.
 
 Enable **⌘⇧C** (Cmd+Shift+C) in Settings to quickly focus waiting sessions without using the menu bar.
@@ -91,6 +91,10 @@ Configure how long inactive sessions remain visible via **Settings → Session T
 #### Codex Support
 OpenAI Codex CLI sessions are monitored alongside Claude Code sessions with the same status display, notifications, and autofocus behavior.
 
+Automatic setup leaves configuration files using quoted/dotted keys, quoted/dotted
+managed table names, or inline tables unchanged rather than risk corrupting valid TOML.
+Existing third-party notify commands and explicitly disabled hooks are preserved.
+
 #### Stream Deck Plugin
 
 Install the included Elgato Stream Deck plugin:
@@ -110,6 +114,10 @@ Install the included Elgato Stream Deck plugin:
 #### iOS Remote Monitoring (vibeterm)
 
 Monitor Claude Code sessions from your iPhone using the companion app [vibeterm](https://apps.apple.com/app/vibeterm).
+
+While enabled, the server retries a failed listener on subsequent 15-second
+watchdog ticks, with at most ten port attempts per tick. Explicitly disabling
+the server cancels recovery attempts.
 
 **Setup:**
 1. Enable "Web Server" in Settings menu
