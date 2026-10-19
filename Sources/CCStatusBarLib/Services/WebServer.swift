@@ -12,12 +12,26 @@ final class WebServer {
     private let maxPortAttempts = 10
     private var watchdog: DispatchSourceTimer?
 
-    private init() {}
+    private var desiredRunning = false
+    private let startListener: (HttpServer, UInt16) throws -> Void
+    private let listenerIsOperating: (HttpServer) -> Bool
+
+    init(
+        startListener: @escaping (HttpServer, UInt16) throws -> Void = {
+            try $0.start($1, forceIPv4: false, priority: .default)
+        },
+        listenerIsOperating: @escaping (HttpServer) -> Bool = { $0.operating }
+    ) {
+        self.startListener = startListener
+        self.listenerIsOperating = listenerIsOperating
+    }
 
     // MARK: - Public API
 
     /// Start the web server, automatically finding an available port
     func start() throws {
+        desiredRunning = true
+        startWatchdog()
         guard server == nil else {
             DebugLog.log("[WebServer] Already running on port \(actualPort)")
             return
@@ -53,7 +67,7 @@ final class WebServer {
         for offset in 0..<maxPortAttempts {
             let port = basePort + UInt16(offset)
             do {
-                try httpServer.start(port, forceIPv4: false, priority: .default)
+                try startListener(httpServer, port)
                 server = httpServer
                 actualPort = port
                 DebugLog.log("[WebServer] Started on port \(port)")
@@ -75,14 +89,14 @@ final class WebServer {
     /// failed accept (out of file descriptors, an aborted connection) without
     /// telling anyone. `isRunning` stays true, so only this tells the truth.
     var isListening: Bool {
-        server?.operating ?? false
+        server.map(listenerIsOperating) ?? false
     }
 
     /// Bring the listener back if it died behind our back. Returns true when
     /// it had to restart.
     @discardableResult
     func ensureListening() -> Bool {
-        guard server != nil, !isListening else { return false }
+        guard desiredRunning, !isListening else { return false }
         DebugLog.log("[WebServer] Listener on port \(actualPort) died; restarting")
         server = nil
         actualPort = 0
@@ -110,6 +124,7 @@ final class WebServer {
 
     /// Stop the web server
     func stop() {
+        desiredRunning = false
         watchdog?.cancel()
         watchdog = nil
         server?.stop()
