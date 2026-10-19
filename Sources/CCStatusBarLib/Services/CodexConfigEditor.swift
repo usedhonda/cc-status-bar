@@ -194,11 +194,31 @@ enum CodexConfigEditor {
                 let name = text.trimmingCharacters(in: .whitespaces)
                     .split(separator: "#").first.map(String.init)?
                     .trimmingCharacters(in: CharacterSet(charactersIn: "[] \t")) ?? ""
+                // Ordinary [projects."/path"] tables remain supported. Only
+                // ambiguous roots and paths redefining features can collide
+                // with the managed [features] table.
+                let rootName = name.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+                guard !name.hasPrefix("\""), !name.hasPrefix("'"),
+                      !(rootName == "features" && name != "features") else {
+                    throw EditError.unsupported("a quoted table root or dotted features table")
+                }
                 table = name
                 line.table = name
                 line.isHeader = true
             } else if let equals = trimmed.firstIndex(of: "=") {
+                // Inspect the original key spelling before string stripping hides
+                // quoted keys. Unsupported semantic paths must never be rewritten.
+                let rawKey = visible.split(separator: "=", maxSplits: 1).first.map(String.init) ?? ""
+                guard !rawKey.contains("."), !rawKey.contains("\""), !rawKey.contains("'") else {
+                    throw EditError.unsupported("quoted or dotted keys")
+                }
+                guard !code.contains("{") else {
+                    throw EditError.unsupported("inline tables")
+                }
                 line.key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+                if table == nil, line.key == "features" {
+                    throw EditError.unsupported("a root features value rather than a table")
+                }
                 line.valueEnd = result.count
                 depth = max(0, bracketDelta(String(trimmed[trimmed.index(after: equals)...])))
                 if depth > 0 || openString != nil { openKeyIndex = result.count }
