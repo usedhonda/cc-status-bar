@@ -17,6 +17,7 @@ CASES = [
     ('features = false\n', True),
     ('features = [\n  { codex_hooks = false }\n]\n', True),
     ('[features.codex_hooks]\nother = true\n', True),
+    ('[features . codex_hooks]\nother = true\n', True),
     ('notify = ["/tmp/fixture/third-party"]\n', False),
     ('[features]\ncodex_hooks = false\n', False),
     ('model = "fixture-model"\n', False),

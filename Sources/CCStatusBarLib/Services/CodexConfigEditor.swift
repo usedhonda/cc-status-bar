@@ -197,7 +197,7 @@ enum CodexConfigEditor {
                 // Ordinary [projects."/path"] tables remain supported. Only
                 // ambiguous roots and paths redefining features can collide
                 // with the managed [features] table.
-                let rootName = name.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+                let rootName = name.split(separator: ".", maxSplits: 1).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
                 guard !name.hasPrefix("\""), !name.hasPrefix("'"),
                       !(rootName == "features" && name != "features") else {
                     throw EditError.unsupported("a quoted table root or dotted features table")
