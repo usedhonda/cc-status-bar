@@ -124,13 +124,21 @@ jobs:
       - name: Staple
         run: xcrun stapler staple /tmp/CCStatusBar.dmg
 
-      - name: Commit version bump
+      - name: Preserve notarized release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            /tmp/CCStatusBar.dmg
+            StreamDeckPlugin/com.ccstatusbar.streamDeckPlugin
+
+      - name: Commit release version for the tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Resources/Info.plist
           git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
-          git push
+          # The release tag carries this version commit; main stays protected.
 
       - name: Create Release
         env:
