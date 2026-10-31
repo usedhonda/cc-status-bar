@@ -18,9 +18,9 @@ enum ITerm2Helper {
     private static var ttyTabIndexCache: [String: Int] = [:]
     private static var ttyTabIndexCacheTime: Date = .distantPast
     private static let cacheTTL: TimeInterval = 3.0
-    /// TTYs iTerm did not know. Every lookup compiles an AppleScript, which macOS
-    /// scans with XProtect, and a TTY of another terminal misses on every refresh.
-    private static var ttyTabIndexMissCache: [String: Date] = [:]
+    /// How long a TTY iTerm does not know stays unknown. Every lookup compiles an
+    /// AppleScript, which macOS scans with XProtect, and a TTY of another terminal
+    /// would otherwise miss on every refresh.
     private static let missCacheTTL: TimeInterval = 30.0
 
     /// Invalidate all caches (call when tab state changes, e.g., after focus/select)
@@ -30,7 +30,6 @@ enum ITerm2Helper {
         tabDescriptorsCacheTime = .distantPast
         ttyTabIndexCache.removeAll()
         ttyTabIndexCacheTime = .distantPast
-        ttyTabIndexMissCache.removeAll()
         cacheLock.unlock()
     }
 
@@ -164,40 +163,35 @@ enum ITerm2Helper {
 
         // Check cache
         cacheLock.lock()
-        if Date().timeIntervalSince(ttyTabIndexCacheTime) < cacheTTL,
-           let cached = ttyTabIndexCache[tty] {
-            cacheLock.unlock()
-            DebugLog.log("[ITerm2Helper] TTY tab index cache hit for \(tty)")
-            return cached
-        }
-        if let missedAt = ttyTabIndexMissCache[tty],
-           Date().timeIntervalSince(missedAt) < missCacheTTL {
+        let age = Date().timeIntervalSince(ttyTabIndexCacheTime)
+        if let cached = ttyTabIndexCache[tty] {
+            if age < cacheTTL {
+                cacheLock.unlock()
+                DebugLog.log("[ITerm2Helper] TTY tab index cache hit for \(tty)")
+                return cached
+            }
+        } else if age < missCacheTTL {
             cacheLock.unlock()
             return nil
         }
         cacheLock.unlock()
 
-        let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
-
-        // Search for session with matching TTY and return its tab index
+        // Read every session's TTY in one script, so a menu full of rows from
+        // other terminals costs one lookup rather than one per row.
         let script = """
             tell application "iTerm"
+                set output to ""
                 try
                     set w to current window
-                    if w is missing value then return "-1"
+                    if w is missing value then return ""
                     set tabList to tabs of w
                     repeat with i from 1 to count of tabList
-                        set t to item i of tabList
-                        repeat with s in sessions of t
-                            if tty of s is "\(escapedTTY)" then
-                                return (i - 1) as string
-                            end if
+                        repeat with s in sessions of item i of tabList
+                            set output to output & (tty of s) & ":" & ((i - 1) as string) & linefeed
                         end repeat
                     end repeat
-                    return "-1"
-                on error errMsg
-                    return "-1"
                 end try
+                return output
             end tell
             """
 
@@ -207,25 +201,26 @@ enum ITerm2Helper {
 
         var error: NSDictionary?
         let result = appleScript.executeAndReturnError(&error)
-
-        guard error == nil,
-              let indexStr = result.stringValue,
-              let index = Int(indexStr),
-              index >= 0 else {
-            cacheLock.lock()
-            ttyTabIndexMissCache[tty] = Date()
-            cacheLock.unlock()
-            return nil
-        }
+        let indexes = error == nil ? ttyTabIndexes(fromScriptOutput: result.stringValue ?? "") : [:]
 
         // Update cache
         cacheLock.lock()
-        ttyTabIndexCache[tty] = index
+        ttyTabIndexCache = indexes
         ttyTabIndexCacheTime = Date()
         cacheLock.unlock()
 
-        DebugLog.log("[ITerm2Helper] Found tab index \(index) for TTY '\(tty)'")
-        return index
+        return indexes[tty]
+    }
+
+    /// `/dev/ttys001:0` lines to a TTY -> tab index map; the first session of a TTY wins.
+    static func ttyTabIndexes(fromScriptOutput output: String) -> [String: Int] {
+        var indexes: [String: Int] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: ":")
+            guard parts.count == 2, let index = Int(parts[1]), indexes[String(parts[0])] == nil else { continue }
+            indexes[String(parts[0])] = index
+        }
+        return indexes
     }
 
     /// Get tab index by searching for a matching session name (0-based)
