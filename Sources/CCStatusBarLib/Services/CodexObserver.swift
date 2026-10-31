@@ -258,7 +258,7 @@ enum CodexObserver {
     private static let snapshotCoordinator = CodexRefreshCoordinator<CodexScanResult>(
         freshTTL: freshTTL,
         scan: {
-            fetchCodexScan()
+            fetchCodexScanWithPaneSnapshot()
         },
         onApplied: { result in
             Task { @MainActor in
@@ -507,6 +507,45 @@ enum CodexObserver {
 
     // MARK: - Private
 
+    /// Every tmux server's pane list, taken once per scan. Each agent is checked
+    /// against all of them, and tmux is the one process a scan still has to start.
+    private struct PaneSnapshot: Sendable {
+        let servers: [String?]
+        let outputs: [String: String]
+    }
+
+    @TaskLocal private static var scanPanes: PaneSnapshot?
+
+    private static func fetchCodexScanWithPaneSnapshot() -> CodexScanResult {
+        let servers: [String?] = [nil] + discoverTmuxSocketPaths().map(Optional.some)
+        var outputs: [String: String] = [:]
+        for server in servers {
+            outputs[server ?? ""] = listLivePanes(socketPath: server)
+        }
+        return $scanPanes.withValue(PaneSnapshot(servers: servers, outputs: outputs)) {
+            fetchCodexScan()
+        }
+    }
+
+    /// Outside a scan these read tmux directly, so a caller that needs current panes gets them.
+    private static func liveTmuxServers() -> [String?] {
+        scanPanes?.servers ?? [nil] + discoverTmuxSocketPaths().map(Optional.some)
+    }
+
+    private static func livePaneOutput(socketPath: String?) -> String {
+        scanPanes?.outputs[socketPath ?? ""] ?? listLivePanes(socketPath: socketPath)
+    }
+
+    private static func listLivePanes(socketPath: String?) -> String {
+        var args: [String] = []
+        if let socketPath, !socketPath.isEmpty {
+            args += ["-S", socketPath]
+        }
+        args += ["list-panes", "-a", "-F",
+                 "#{pane_id}\\t#{pane_pid}\\t#{pane_tty}\\t#{session_name}\\t#{window_index}\\t#{pane_index}\\t#{socket_path}"]
+        return runCommand(tmuxExecutable(), args)
+    }
+
     /// Fetch active Codex sessions and stable pane evidence from running processes.
     private static func fetchCodexScan() -> CodexScanResult {
         var sessions: [String: CodexSession] = [:]
@@ -660,12 +699,8 @@ enum CodexObserver {
         // Walked once: every pane of every server is checked against it.
         let lineage = processLineage(of: agentPID)
         var candidates: [String: CodexStableTmuxInfo] = [:]
-        for socketPath in [nil] + discoverTmuxSocketPaths().map(Optional.some) {
-            var args: [String] = []
-            if let socketPath { args += ["-S", socketPath] }
-            args += ["list-panes", "-a", "-F",
-                     "#{pane_id}\\t#{pane_pid}\\t#{pane_tty}\\t#{session_name}\\t#{window_index}\\t#{pane_index}\\t#{socket_path}"]
-            for line in runCommand(tmuxExecutable(), args).split(separator: "\n") {
+        for socketPath in liveTmuxServers() {
+            for line in livePaneOutput(socketPath: socketPath).split(separator: "\n") {
                 let raw = String(line)
                 let parts = raw.components(separatedBy: raw.contains("\\t") ? "\\t" : "\t")
                 guard parts.count == 7, let row = parseLivePaneRow(line),
@@ -696,15 +731,9 @@ enum CodexObserver {
         let agentStart = processStartToken(for: agentPID)
         guard !tty.isEmpty else { return nil }
 
-        let paths: [String?] = [nil] + discoverTmuxSocketPaths().map(Optional.some)
+        let paths = liveTmuxServers()
         for socketPath in paths {
-            let format = "#{pane_id}\\t#{pane_pid}\\t#{pane_tty}\\t#{session_name}\\t#{window_index}\\t#{pane_index}\\t#{window_name}"
-            var args: [String] = []
-            if let socketPath, !socketPath.isEmpty {
-                args += ["-S", socketPath]
-            }
-            args += ["list-panes", "-a", "-F", format]
-            let output = runCommand(tmuxExecutable(), args)
+            let output = livePaneOutput(socketPath: socketPath)
             for line in output.split(separator: "\n") {
                 guard let row = parseLivePaneRow(line),
                       TmuxHelper.normalizeTTY(row.tty) == TmuxHelper.normalizeTTY(tty),
