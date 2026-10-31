@@ -18,6 +18,10 @@ enum ITerm2Helper {
     private static var ttyTabIndexCache: [String: Int] = [:]
     private static var ttyTabIndexCacheTime: Date = .distantPast
     private static let cacheTTL: TimeInterval = 3.0
+    /// TTYs iTerm did not know. Every lookup compiles an AppleScript, which macOS
+    /// scans with XProtect, and a TTY of another terminal misses on every refresh.
+    private static var ttyTabIndexMissCache: [String: Date] = [:]
+    private static let missCacheTTL: TimeInterval = 30.0
 
     /// Invalidate all caches (call when tab state changes, e.g., after focus/select)
     static func invalidateCache() {
@@ -26,6 +30,7 @@ enum ITerm2Helper {
         tabDescriptorsCacheTime = .distantPast
         ttyTabIndexCache.removeAll()
         ttyTabIndexCacheTime = .distantPast
+        ttyTabIndexMissCache.removeAll()
         cacheLock.unlock()
     }
 
@@ -165,6 +170,11 @@ enum ITerm2Helper {
             DebugLog.log("[ITerm2Helper] TTY tab index cache hit for \(tty)")
             return cached
         }
+        if let missedAt = ttyTabIndexMissCache[tty],
+           Date().timeIntervalSince(missedAt) < missCacheTTL {
+            cacheLock.unlock()
+            return nil
+        }
         cacheLock.unlock()
 
         let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
@@ -198,13 +208,13 @@ enum ITerm2Helper {
         var error: NSDictionary?
         let result = appleScript.executeAndReturnError(&error)
 
-        if error != nil {
-            return nil
-        }
-
-        guard let indexStr = result.stringValue,
+        guard error == nil,
+              let indexStr = result.stringValue,
               let index = Int(indexStr),
               index >= 0 else {
+            cacheLock.lock()
+            ttyTabIndexMissCache[tty] = Date()
+            cacheLock.unlock()
             return nil
         }
 
