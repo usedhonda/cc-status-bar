@@ -28,18 +28,17 @@ final class CodexRolloutDiscoveryTests: XCTestCase {
         return url.path
     }
 
-    // MARK: - rolloutPaths(fromLsofOutput:)
+    // MARK: - rolloutPaths(fromOpenFiles:)
 
     func testRolloutPathsPicksOpenTranscriptsOnly() {
-        let output = """
-        codex   70114 usedhonda  cwd    DIR  1,13  1024 123 /Users/u/projects/pocket-chi
-        codex   70114 usedhonda   19u   REG  1,13  4140632 456 /Users/u/.codex/queue_1.sqlite-wal
-        codex   70114 usedhonda   48u   REG  1,13  66393367 789 /Users/u/.codex/sessions/2026/09/17/rollout-2026-09-17T14-36-14-01a0ae14.jsonl
-        codex   70114 usedhonda   74u   REG  1,13  1511330 790 /Users/u/.codex/sessions/2026/09/19/rollout-2026-09-19T23-53-30-01a0ba5f.jsonl
-        """
+        let files = [
+            "/Users/u/.codex/queue_1.sqlite-wal",
+            "/Users/u/.codex/sessions/2026/09/17/rollout-2026-09-17T14-36-14-01a0ae14.jsonl",
+            "/Users/u/.codex/sessions/2026/09/17/rollout-2026-09-17T14-36-14-01a0ae14.jsonl",
+            "/Users/u/.codex/sessions/2026/09/19/rollout-2026-09-19T23-53-30-01a0ba5f.jsonl",
+        ]
 
-        XCTAssertEqual(CodexObserver.cwd(fromLsofOutput: output), "/Users/u/projects/pocket-chi")
-        XCTAssertEqual(CodexObserver.rolloutPaths(fromLsofOutput: output), [
+        XCTAssertEqual(CodexObserver.rolloutPaths(fromOpenFiles: files), [
             "/Users/u/.codex/sessions/2026/09/17/rollout-2026-09-17T14-36-14-01a0ae14.jsonl",
             "/Users/u/.codex/sessions/2026/09/19/rollout-2026-09-19T23-53-30-01a0ba5f.jsonl",
         ])

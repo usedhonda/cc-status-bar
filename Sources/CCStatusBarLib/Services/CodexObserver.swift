@@ -590,14 +590,7 @@ enum CodexObserver {
 
         // Current Codex CLI typically runs as a direct executable named "codex"
         // (or occasionally "codex-cli"), so prioritize exact process-name matches.
-        for processName in ["codex", "codex-cli"] {
-            let output = runCommand("/usr/bin/pgrep", ["-x", processName])
-            for line in output.split(separator: "\n") {
-                if let pid = pid_t(line.trimmingCharacters(in: .whitespaces)) {
-                    pidSet.insert(pid)
-                }
-            }
-        }
+        pidSet.formUnion(ProcessInspector.pids(named: ["codex", "codex-cli"]))
 
         var excludedCounts: [String: Int] = [:]
         let filteredPIDs = pidSet.filter { pid in
@@ -647,7 +640,7 @@ enum CodexObserver {
 
     /// Get full command line for a process
     private static func getCommandLine(for pid: pid_t) -> String {
-        runCommand("/bin/ps", ["-p", "\(pid)", "-o", "command="])
+        ProcessInspector.commandLine(of: pid)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -846,20 +839,18 @@ enum CodexObserver {
         }
     }
 
-    /// The open-file facts a single `lsof` call gives us about a Codex process.
+    /// The open-file facts the kernel gives us about a Codex process.
     struct CodexProcessFiles {
         let cwd: String?
         let rolloutPaths: [String]
     }
 
-    /// Read cwd and open rollout transcripts for a process in one `lsof` call.
-    /// `-n -P` keeps lsof from doing reverse DNS / service lookups on the
-    /// sqlite and socket descriptors Codex keeps open.
+    /// Read cwd and open rollout transcripts for a process.
     private static func processFiles(for pid: pid_t) -> CodexProcessFiles {
-        let output = runCommand("/usr/sbin/lsof", ["-n", "-P", "-p", "\(pid)"])
+        let files = ProcessInspector.openFiles(of: pid)
         return CodexProcessFiles(
-            cwd: cwd(fromLsofOutput: output),
-            rolloutPaths: rolloutPaths(fromLsofOutput: output)
+            cwd: files.cwd,
+            rolloutPaths: rolloutPaths(fromOpenFiles: files.paths)
         )
     }
 
@@ -868,37 +859,16 @@ enum CodexObserver {
         processFiles(for: pid).cwd
     }
 
-    /// NAME column of an `lsof` row (columns 9+, which may contain spaces).
-    private static func lsofName(_ line: Substring) -> (fd: String, name: String)? {
-        let columns = line.split(separator: " ", omittingEmptySubsequences: true)
-        // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-        guard columns.count >= 9 else { return nil }
-        let nameStartIndex = columns.index(columns.startIndex, offsetBy: 8)
-        return (String(columns[3]), columns[nameStartIndex...].joined(separator: " "))
-    }
-
-    /// Visible for tests.
-    static func cwd(fromLsofOutput output: String) -> String? {
-        for line in output.split(separator: "\n") {
-            if let row = lsofName(line), row.fd == "cwd" {
-                return row.name
-            }
-        }
-        return nil
-    }
-
-    /// Rollout transcripts the process currently holds open, in lsof order.
+    /// Rollout transcripts the process currently holds open, in descriptor order.
     /// A Codex process keeps its own transcript open, so this is the only
     /// authoritative pid -> session mapping: `codex resume --last` keeps
     /// appending to the original file, which stays in the day directory it
     /// was created in, so no date-window search can find it.
     /// Visible for tests.
-    static func rolloutPaths(fromLsofOutput output: String) -> [String] {
+    static func rolloutPaths(fromOpenFiles files: [String]) -> [String] {
         var seen = Set<String>()
         var paths: [String] = []
-        for line in output.split(separator: "\n") {
-            guard let row = lsofName(line) else { continue }
-            let name = row.name
+        for name in files {
             guard name.contains("/.codex/sessions/"),
                   name.hasSuffix(".jsonl"),
                   (name as NSString).lastPathComponent.hasPrefix("rollout-"),
