@@ -27,6 +27,10 @@ final class CodexObserverTests: XCTestCase {
         XCTAssertNil(CodexObserver.processParentPID(for: gonePID))
         XCTAssertNil(CodexObserver.processStartToken(for: gonePID))
         XCTAssertNil(CodexObserver.getTTY(for: gonePID))
+
+        let lineage = CodexObserver.processLineage(of: getpid())
+        XCTAssertTrue(lineage.isSuperset(of: [getpid(), getppid()]))
+        XCTAssertFalse(lineage.contains(1))
     }
 
     func testShouldTrackCodexCommandLineForInteractiveCodex() {

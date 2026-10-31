@@ -664,6 +664,8 @@ enum CodexObserver {
     /// it out of its tmux pane. Resolve that relationship only for the feed.
     private static func resolveAncestralAttachmentPane(for agentPID: pid_t) -> CodexStableTmuxInfo? {
         guard let agentStart = processStartToken(for: agentPID) else { return nil }
+        // Walked once: every pane of every server is checked against it.
+        let lineage = processLineage(of: agentPID)
         var candidates: [String: CodexStableTmuxInfo] = [:]
         for socketPath in [nil] + discoverTmuxSocketPaths().map(Optional.some) {
             var args: [String] = []
@@ -675,7 +677,7 @@ enum CodexObserver {
                 let parts = raw.components(separatedBy: raw.contains("\\t") ? "\\t" : "\t")
                 guard parts.count == 7, let row = parseLivePaneRow(line),
                       row.paneID.hasPrefix("%"), row.panePID > 0,
-                      !parts[6].isEmpty, isProcessDescendant(agentPID, of: row.panePID) else { continue }
+                      !parts[6].isEmpty, lineage.contains(row.panePID) else { continue }
                 let socket = URL(fileURLWithPath: parts[6]).resolvingSymlinksInPath().standardizedFileURL.path
                 let key = "\(socket)|\(row.paneID)|\(row.panePID)"
                 if candidates[key] == nil {
@@ -809,14 +811,18 @@ enum CodexObserver {
     }
 
     private static func isProcessDescendant(_ processPID: pid_t, of ancestorPID: pid_t) -> Bool {
-        var current = processPID
-        var visited = Set<pid_t>()
-        while current > 1, visited.insert(current).inserted {
-            if current == ancestorPID { return true }
-            guard let parent = processParentPID(for: current), parent != current else { return false }
+        processLineage(of: processPID).contains(ancestorPID)
+    }
+
+    /// The process and its ancestors, excluding launchd.
+    static func processLineage(of pid: pid_t) -> Set<pid_t> {
+        var current = pid
+        var lineage = Set<pid_t>()
+        while current > 1, lineage.insert(current).inserted {
+            guard let parent = processParentPID(for: current) else { break }
             current = parent
         }
-        return false
+        return lineage
     }
 
     /// The kernel's record of a process, as `ps` reads it, without spawning `ps`.
