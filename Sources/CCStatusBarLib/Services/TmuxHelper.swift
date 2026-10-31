@@ -656,7 +656,9 @@ enum TmuxHelper {
         candidates.append("/private/tmp/tmux-\(uid)/default")
         candidates.append("/tmp/tmux-\(uid)/default")
 
-        let uniquePaths = deduplicatePaths(candidates)
+        // Socket files outlive their servers. Asking tmux about each dead one
+        // spawns a process that only reports "no server running".
+        let uniquePaths = deduplicatePaths(candidates).filter(isSocketListening)
 
         cacheLock.lock()
         socketPathsCache = (uniquePaths, now)
@@ -678,6 +680,34 @@ enum TmuxHelper {
             uniquePaths.append(normalizedPath)
         }
         return uniquePaths
+    }
+
+    /// Whether a server is listening on this unix socket, without spawning anything.
+    /// Only a definite "nobody there" counts as dead; anything else is left for tmux to answer.
+    static func isSocketListening(_ path: String) -> Bool {
+        var address = sockaddr_un()
+        let pathBytes = path.utf8CString.map { UInt8(bitPattern: $0) }
+        guard pathBytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { return true }
+
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return true }
+        defer { close(fd) }
+        _ = fcntl(fd, F_SETFL, O_NONBLOCK)
+
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: pathBytes) }
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if result == 0 { return true }
+        switch errno {
+        case ECONNREFUSED, ENOENT, ENOTSOCK:
+            return false
+        default:
+            return true
+        }
     }
 
     private static func runTmuxCommandArgs(_ args: [String], socketPath: String? = nil) -> String {

@@ -3,6 +3,36 @@ import XCTest
 
 final class TmuxHelperTests: XCTestCase {
 
+    // MARK: - isSocketListening
+
+    func testSocketListeningTellsLiveServerFromLeftoverFile() throws {
+        let path = "/tmp/ccsb-\(UUID().uuidString.prefix(8))"
+        defer { unlink(path) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = path.utf8CString.map { UInt8(bitPattern: $0) }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: pathBytes) }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(bound, 0)
+        XCTAssertEqual(listen(fd, 1), 0)
+        XCTAssertTrue(TmuxHelper.isSocketListening(path))
+
+        // The server is gone but its socket file stays behind.
+        close(fd)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        XCTAssertFalse(TmuxHelper.isSocketListening(path))
+
+        unlink(path)
+        try Data().write(to: URL(fileURLWithPath: path))
+        XCTAssertFalse(TmuxHelper.isSocketListening(path))
+    }
+
     // MARK: - RemoteAccessInfo.attachCommand
 
     func testAttachCommandWithoutSocket() {
