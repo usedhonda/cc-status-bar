@@ -571,9 +571,10 @@ enum CodexObserver {
     /// Get TTY for a process
     /// - Parameter pid: Process ID
     /// - Returns: TTY path (e.g., "/dev/ttys001") or nil
-    private static func getTTY(for pid: pid_t) -> String? {
-        // ps -p <pid> -o tty=
-        controllingTerminal(fromPSField: runCommand("/bin/ps", ["-p", "\(pid)", "-o", "tty="]))
+    static func getTTY(for pid: pid_t) -> String? {
+        guard let device = kernelProcessInfo(for: pid)?.kp_eproc.e_tdev, device != -1,
+              let name = devname(device, S_IFCHR) else { return nil }
+        return controllingTerminal(fromPSField: String(cString: name))
     }
 
     /// `ps -o tty=` output to a device path; nil when there is no controlling
@@ -801,7 +802,8 @@ enum CodexObserver {
             let normalized = (path as NSString).standardizingPath
             guard !normalized.isEmpty,
                   FileManager.default.fileExists(atPath: normalized),
-                  seen.insert(normalized).inserted else { return nil }
+                  seen.insert(normalized).inserted,
+                  TmuxHelper.isSocketListening(normalized) else { return nil }
             return normalized
         }
     }
@@ -817,15 +819,25 @@ enum CodexObserver {
         return false
     }
 
-    private static func processParentPID(for pid: pid_t) -> pid_t? {
-        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "ppid="])
-        return pid_t(output.trimmingCharacters(in: .whitespacesAndNewlines))
+    /// The kernel's record of a process, as `ps` reads it, without spawning `ps`.
+    /// A scan walks the ancestors of every agent, so this runs hundreds of times.
+    private static func kernelProcessInfo(for pid: pid_t) -> kinfo_proc? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var query = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&query, u_int(query.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info
     }
 
-    private static func processStartToken(for pid: pid_t) -> String? {
-        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "lstart="])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return output.isEmpty ? nil : output
+    static func processParentPID(for pid: pid_t) -> pid_t? {
+        kernelProcessInfo(for: pid)?.kp_eproc.e_ppid
+    }
+
+    static func processStartToken(for pid: pid_t) -> String? {
+        kernelProcessInfo(for: pid).map {
+            let start = $0.kp_proc.p_un.__p_starttime
+            return "\(start.tv_sec).\(start.tv_usec)"
+        }
     }
 
     /// The open-file facts a single `lsof` call gives us about a Codex process.

@@ -2,6 +2,33 @@ import XCTest
 @testable import CCStatusBarLib
 
 final class CodexObserverTests: XCTestCase {
+    /// These replaced `ps`, so they must agree with it, including for a process with no terminal.
+    func testProcessFactsMatchPS() throws {
+        func ps(_ pid: pid_t, _ field: String) throws -> String {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/ps")
+            process.arguments = ["-p", "\(pid)", "-o", "\(field)="]
+            process.standardOutput = pipe
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        for pid in [getpid(), getppid(), 1] {
+            XCTAssertEqual(CodexObserver.processParentPID(for: pid), pid_t(try ps(pid, "ppid")))
+            XCTAssertEqual(CodexObserver.getTTY(for: pid), CodexObserver.controllingTerminal(fromPSField: try ps(pid, "tty")))
+        }
+        XCTAssertEqual(CodexObserver.processStartToken(for: getpid()), CodexObserver.processStartToken(for: getpid()))
+        XCTAssertNotEqual(CodexObserver.processStartToken(for: getpid()), CodexObserver.processStartToken(for: 1))
+
+        let gonePID: pid_t = 99_999
+        XCTAssertNil(CodexObserver.processParentPID(for: gonePID))
+        XCTAssertNil(CodexObserver.processStartToken(for: gonePID))
+        XCTAssertNil(CodexObserver.getTTY(for: gonePID))
+    }
+
     func testShouldTrackCodexCommandLineForInteractiveCodex() {
         XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex"))
         XCTAssertTrue(CodexObserver.shouldTrackCodexCommandLine("codex --model gpt-5"))
