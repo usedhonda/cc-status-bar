@@ -98,6 +98,8 @@ extension CodexSession: Identifiable {
 
     /// Display text based on session display mode setting
     func displayText(for mode: SessionDisplayMode) -> String {
+        // The project name needs no tmux lookup, and this runs for every row on every rebuild.
+        guard mode != .projectName else { return projectName }
         let paneInfo = tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
         switch mode {
         case .projectName:

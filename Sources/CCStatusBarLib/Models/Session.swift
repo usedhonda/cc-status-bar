@@ -97,6 +97,8 @@ struct Session: Codable, Identifiable, Equatable {
     ///   - mode: The session display mode
     ///   - paneInfo: Optional pre-fetched pane info (avoids redundant lookups)
     func displayText(for mode: SessionDisplayMode, paneInfo: TmuxHelper.PaneInfo? = nil) -> String {
+        // The project name needs no tmux lookup, and this runs for every row on every rebuild.
+        guard mode != .projectName else { return displayName }
         let info = paneInfo ?? tty.flatMap { TmuxHelper.getPaneInfo(for: $0) }
         switch mode {
         case .projectName:
